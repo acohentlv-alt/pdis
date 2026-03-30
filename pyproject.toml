@@ -1,0 +1,9 @@
+[project]
+name = "pdis"
+version = "0.1.0"
+description = "Property Daily Intelligence Scanner for Israeli Real Estate"
+requires-python = ">=3.12"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
