@@ -62,3 +62,11 @@ export function useOperatorInput(yad2Id: string | undefined) {
     enabled: !!yad2Id,
   });
 }
+
+export function useMatches(yad2Id: string | undefined) {
+  return useQuery({
+    queryKey: ['matches', yad2Id],
+    queryFn: () => apiFetch<{ matches: Record<string, unknown>[] }>(`/api/properties/${yad2Id}/matches`),
+    enabled: !!yad2Id,
+  });
+}

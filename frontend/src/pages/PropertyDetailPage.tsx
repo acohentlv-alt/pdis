@@ -1,5 +1,5 @@
 import { useNavigate, useParams } from 'react-router-dom';
-import { useProperty, useSignals, useEvents, useOperatorInput } from '../api/queries';
+import { useProperty, useSignals, useEvents, useOperatorInput, useMatches } from '../api/queries';
 import { useWhitelist, useRemoveWhitelist, useBlacklist, useRemoveBlacklist } from '../api/mutations';
 import { formatPrice, formatPricePerSqm, formatDate, formatDateFull, CLASSIFICATION_STYLES } from '../lib/format';
 import LifecycleTimeline from '../components/LifecycleTimeline';
@@ -39,6 +39,7 @@ export default function PropertyDetailPage() {
   useSignals(yad2Id);
   const { data: eventsData } = useEvents(yad2Id);
   useOperatorInput(yad2Id);
+  const { data: matchesData } = useMatches(yad2Id);
 
   const whitelist = useWhitelist(yad2Id!);
   const removeWhitelist = useRemoveWhitelist(yad2Id!);
@@ -90,6 +91,7 @@ export default function PropertyDetailPage() {
   const attempts = relistingCount + 1;
 
   const notes = (prop.notes as { id: number; note: string; created_by: string; created_at: string }[]) ?? [];
+  const matches = (matchesData?.matches as Record<string, unknown>[]) ?? [];
   const isWhitelisted = !!(prop.is_whitelisted);
   const isBlacklisted = !!(prop.is_blacklisted);
 
@@ -274,6 +276,37 @@ export default function PropertyDetailPage() {
       <Section title="Notes">
         <NotesList yad2Id={yad2Id!} notes={notes} />
       </Section>
+
+      {/* Matches */}
+      {matches.length > 0 && (
+        <Section title="Doublons détectés">
+          <div className="space-y-2">
+            {matches.map((m) => {
+              const tier = m.match_tier as number;
+              const matched = m.matched_property as Record<string, unknown> | null;
+              const tierBadge =
+                tier === 0
+                  ? <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">Même propriétaire</span>
+                  : tier === 1
+                  ? <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">Même immeuble</span>
+                  : tier === 2
+                  ? <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">Bien similaire</span>
+                  : <span className="text-xs bg-gray-50 text-gray-400 px-2 py-0.5 rounded-full font-medium">Correspondance possible</span>;
+
+              return (
+                <div key={m.id as number} className="flex items-center justify-between gap-2 text-sm">
+                  <div className="text-gray-700 truncate">
+                    {matched
+                      ? (matched.address_street as string) || (matched.yad2_id as string)
+                      : '—'}
+                  </div>
+                  {tierBadge}
+                </div>
+              );
+            })}
+          </div>
+        </Section>
+      )}
 
       {/* Action Buttons */}
       <div className="space-y-2 pb-8">

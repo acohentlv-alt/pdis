@@ -344,6 +344,7 @@ async def run_scan(preset_id: int) -> dict:
     new_count = 0
     event_count = 0
     match_count = 0
+    relist_count = 0
 
     try:
         result = await scrape_preset(dict(preset))
@@ -383,10 +384,14 @@ async def run_scan(preset_id: int) -> dict:
             log.info("scanner.classified", count=len(property_ids))
 
         # Find property matches
-        from pdis.matching import find_matches
+        from pdis.matching import find_matches, detect_customer_relistings
         match_count = await find_matches(session_id)
         if match_count > 0:
             log.info("scanner.matches_found", count=match_count)
+
+        relist_count = await detect_customer_relistings(session_id)
+        if relist_count > 0:
+            log.info("scanner.customer_relistings", count=relist_count)
 
         # Record per-preset stats
         await _record_preset_stats(preset_id, session_id)
@@ -414,6 +419,7 @@ async def run_scan(preset_id: int) -> dict:
         "errors": result.errors,
         "events_detected": event_count,
         "matches_found": match_count,
+        "customer_relistings": relist_count,
     }
 
 
