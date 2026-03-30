@@ -344,6 +344,14 @@ async def run_migrations() -> None:
                 WHERE address_home_number IS NULL AND raw_data->>'address_home_number' IS NOT NULL
             """)
 
+            # Seed Madlan preset if not exists
+            await cur.execute("""
+                INSERT INTO search_presets (name, category, city_code, min_price, max_price, min_rooms, max_rooms, extra_params, is_active)
+                SELECT 'Madlan TLV Rental', 'rent', 'madlan', 3000, 15000, 1.0, 5.0,
+                       '{"source": "madlan", "madlan_city": "תל אביב יפו"}'::jsonb, TRUE
+                WHERE NOT EXISTS (SELECT 1 FROM search_presets WHERE name = 'Madlan TLV Rental')
+            """)
+
         await conn.commit()
     logger.info("db.migrations_done")
     await seed_presets()

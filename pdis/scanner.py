@@ -10,6 +10,7 @@ import structlog
 import pdis.database as _db
 from pdis.models import ScrapedListing, ScrapeResult
 from pdis.scraper import scrape_preset
+from pdis.scraper_madlan import scrape_madlan_preset
 
 logger = structlog.get_logger(__name__)
 
@@ -351,11 +352,21 @@ async def run_scan(preset_id: int) -> dict:
     relist_count = 0
 
     try:
-        result = await scrape_preset(dict(preset))
+        # Detect source from preset extra_params
+        _extra = preset.get("extra_params") or {}
+        if isinstance(_extra, str):
+            import json as _json
+            _extra = _json.loads(_extra)
+        _source = _extra.get("source", "yad2")
+
+        if _source == "madlan":
+            result = await scrape_madlan_preset(dict(preset))
+        else:
+            result = await scrape_preset(dict(preset))
 
         if result.was_blocked and len(result.listings) == 0:
             status = "blocked"
-            error_message = "Yad2 blocked the request — zero listings retrieved"
+            error_message = f"{_source.capitalize()} blocked the request — zero listings retrieved"
         elif result.was_blocked and len(result.listings) > 0:
             status = "done"
             error_message = f"Partial block detected on final page but {len(result.listings)} listings collected successfully"
