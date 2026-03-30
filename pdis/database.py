@@ -257,6 +257,18 @@ async def run_migrations() -> None:
                     created_at      TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
+
+            await cur.execute("""
+                CREATE TABLE IF NOT EXISTS property_operator_input (
+                    id              SERIAL PRIMARY KEY,
+                    property_id     INTEGER NOT NULL UNIQUE REFERENCES properties(id),
+                    agent_name      TEXT,
+                    manual_days_on_market INTEGER,
+                    flexibility     TEXT,
+                    condition       TEXT,
+                    updated_at      TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
             await cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_preset_stats_session ON scan_preset_stats(session_id)"
             )

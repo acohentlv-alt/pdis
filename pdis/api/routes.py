@@ -138,7 +138,7 @@ async def list_properties(
     is_active: bool | None = Query(default=None),
     min_days_on_market: int | None = Query(default=None),
     page: int = Query(default=1, ge=1),
-    per_page: int = Query(default=50, ge=1, le=200),
+    per_page: int = Query(default=50, ge=1, le=1000),
 ):
     conditions = []
     params: list = []
@@ -268,11 +268,18 @@ async def get_property(yad2_id: str):
                     "matched_property": dict(matched_prop) if matched_prop else None,
                 })
 
+            await cur.execute("SELECT 1 FROM whitelist WHERE property_id = %s", (prop["id"],))
+            is_whitelisted = await cur.fetchone() is not None
+            await cur.execute("SELECT 1 FROM blacklist WHERE property_id = %s", (prop["id"],))
+            is_blacklisted = await cur.fetchone() is not None
+
     result = dict(prop)
     result["snapshots"] = [dict(s) for s in snapshots]
     result["classification"] = dict(classification_row) if classification_row else None
     result["notes"] = [dict(n) for n in notes_rows]
     result["matches"] = matches
+    result["is_whitelisted"] = is_whitelisted
+    result["is_blacklisted"] = is_blacklisted
     return result
 
 
@@ -329,7 +336,7 @@ async def list_events(
     property_id: int | None = Query(default=None),
     event_type: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
-    per_page: int = Query(default=50, ge=1, le=200),
+    per_page: int = Query(default=50, ge=1, le=1000),
 ):
     conditions = []
     params: list = []
@@ -623,7 +630,7 @@ async def list_classifications(
     classification: str | None = Query(default=None),
     min_score: float | None = Query(default=None),
     page: int = Query(default=1, ge=1),
-    per_page: int = Query(default=50, ge=1, le=200),
+    per_page: int = Query(default=50, ge=1, le=1000),
 ):
     conditions = []
     params: list = []
@@ -677,7 +684,7 @@ async def list_classifications(
 @router.get("/api/opportunities")
 async def list_opportunities(
     page: int = Query(default=1, ge=1),
-    per_page: int = Query(default=50, ge=1, le=200),
+    per_page: int = Query(default=50, ge=1, le=1000),
 ):
     offset = (page - 1) * per_page
 
@@ -986,3 +993,85 @@ async def get_stats():
         "whitelisted": whitelist_row["cnt"] if whitelist_row else 0,
         "blacklisted": blacklist_row["cnt"] if blacklist_row else 0,
     }
+
+
+# ---------------------------------------------------------------------------
+# Operator Input
+# ---------------------------------------------------------------------------
+
+class OperatorInputBody(BaseModel):
+    agent_name: str | None = None
+    manual_days_on_market: int | None = None
+    flexibility: str | None = None
+    condition: str | None = None
+
+
+@router.get("/api/properties/{yad2_id}/operator-input")
+async def get_operator_input(yad2_id: str):
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT id FROM properties WHERE yad2_id = %s",
+                (yad2_id,),
+            )
+            prop = await cur.fetchone()
+            if not prop:
+                raise HTTPException(status_code=404, detail="Property not found")
+
+            await cur.execute(
+                """
+                SELECT agent_name, manual_days_on_market, flexibility, condition, updated_at
+                FROM property_operator_input
+                WHERE property_id = %s
+                """,
+                (prop["id"],),
+            )
+            row = await cur.fetchone()
+
+    if row:
+        return dict(row)
+    return {
+        "agent_name": None,
+        "manual_days_on_market": None,
+        "flexibility": None,
+        "condition": None,
+        "updated_at": None,
+    }
+
+
+@router.put("/api/properties/{yad2_id}/operator-input")
+async def upsert_operator_input(yad2_id: str, body: OperatorInputBody):
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT id FROM properties WHERE yad2_id = %s",
+                (yad2_id,),
+            )
+            prop = await cur.fetchone()
+            if not prop:
+                raise HTTPException(status_code=404, detail="Property not found")
+
+            await cur.execute(
+                """
+                INSERT INTO property_operator_input
+                    (property_id, agent_name, manual_days_on_market, flexibility, condition, updated_at)
+                VALUES (%s, %s, %s, %s, %s, NOW())
+                ON CONFLICT (property_id) DO UPDATE SET
+                    agent_name = EXCLUDED.agent_name,
+                    manual_days_on_market = EXCLUDED.manual_days_on_market,
+                    flexibility = EXCLUDED.flexibility,
+                    condition = EXCLUDED.condition,
+                    updated_at = NOW()
+                RETURNING agent_name, manual_days_on_market, flexibility, condition, updated_at
+                """,
+                (
+                    prop["id"],
+                    body.agent_name,
+                    body.manual_days_on_market,
+                    body.flexibility,
+                    body.condition,
+                ),
+            )
+            row = await cur.fetchone()
+        await conn.commit()
+    return dict(row)

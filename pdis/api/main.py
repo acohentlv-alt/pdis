@@ -80,3 +80,17 @@ app.add_middleware(
 )
 
 app.include_router(router)
+
+import os
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+frontend_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "frontend", "dist")
+if os.path.isdir(frontend_dir):
+    app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dir, "assets")), name="assets")
+
+    @app.get("/{path:path}")
+    async def serve_spa(path: str):
+        """Catch-all: serve index.html for SPA routing. API routes registered first take priority."""
+        index = os.path.join(frontend_dir, "index.html")
+        return FileResponse(index)
