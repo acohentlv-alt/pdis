@@ -2,6 +2,8 @@
 PDIS API routes.
 """
 
+from datetime import datetime
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
@@ -95,6 +97,48 @@ async def trigger_all_scans():
         logger.error("api.scan_all_error", error=str(exc))
         raise HTTPException(status_code=500, detail=str(exc))
     return {"scans": results}
+
+
+class OpenSearchBody(BaseModel):
+    city_code: str = "5000"
+    min_price: int | None = None
+    max_price: int | None = None
+    min_rooms: float | None = None
+    max_rooms: float | None = None
+    category: str = "rent"
+
+
+@router.post("/api/scan/open")
+async def trigger_open_scan(body: OpenSearchBody):
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """INSERT INTO search_presets
+                   (name, category, city_code, min_price, max_price, min_rooms, max_rooms, is_active)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, FALSE)
+                   RETURNING id""",
+                (
+                    f"Recherche libre {datetime.now().strftime('%d.%m %H:%M')}",
+                    body.category,
+                    body.city_code,
+                    body.min_price,
+                    body.max_price,
+                    body.min_rooms,
+                    body.max_rooms,
+                ),
+            )
+            row = await cur.fetchone()
+        await conn.commit()
+
+    preset_id = row["id"]
+
+    try:
+        result = await run_scan(preset_id)
+    except Exception as exc:
+        logger.error("api.open_scan_error", preset_id=preset_id, error=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return result
 
 
 @router.post("/api/scan/{preset_id}")
