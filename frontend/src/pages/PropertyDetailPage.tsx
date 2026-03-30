@@ -47,6 +47,8 @@ export default function PropertyDetailPage() {
   const removeWhitelist = useRemoveWhitelist(yad2Id!);
   const blacklist = useBlacklist(yad2Id!);
   const removeBlacklist = useRemoveBlacklist(yad2Id!);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerStartIndex, setViewerStartIndex] = useState(0);
 
   if (isLoading || !prop) {
     return (
@@ -98,8 +100,6 @@ export default function PropertyDetailPage() {
   const isBlacklisted = !!(prop.is_blacklisted);
 
   const imageUrls = (prop.image_urls as string[] | null) ?? [];
-  const [viewerOpen, setViewerOpen] = useState(false);
-  const [viewerStartIndex, setViewerStartIndex] = useState(0);
   const yad2DateAdded = prop.yad2_date_added as string | null;
 
   const isAgent = !!(prop.is_agent);
