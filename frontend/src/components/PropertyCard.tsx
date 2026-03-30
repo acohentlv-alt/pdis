@@ -2,11 +2,11 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { formatPrice, formatPricePerSqm, CLASSIFICATION_STYLES } from '../lib/format';
 import ImageViewer from './ImageViewer';
-import { useFavoriteIds } from '../api/queries';
-import { useToggleFavorite } from '../api/mutations';
 
 interface PropertyCardProps {
   item: Record<string, unknown>;
+  favoriteIds?: Set<string>;
+  onToggleFavorite?: (yad2Id: string, isFav: boolean) => void;
 }
 
 function getSignalDetails(item: Record<string, unknown>): Record<string, unknown> {
@@ -16,15 +16,12 @@ function getSignalDetails(item: Record<string, unknown>): Record<string, unknown
   return {};
 }
 
-export default function PropertyCard({ item }: PropertyCardProps) {
+export default function PropertyCard({ item, favoriteIds, onToggleFavorite }: PropertyCardProps) {
   const navigate = useNavigate();
   const yad2Id = item.yad2_id as string;
   const classification = (item.classification as string) ?? 'cold';
   const style = CLASSIFICATION_STYLES[classification] ?? CLASSIFICATION_STYLES.cold;
   const sd = getSignalDetails(item);
-  const source = (item.source as string) ?? 'yad2';
-  const matchedSources = (item.matched_sources as string[] | null) ?? [];
-  const allSources = new Set([source, ...matchedSources]);
 
   const price = item.price as number | null;
   const sqm = item.square_meters as number | null;
@@ -42,10 +39,11 @@ export default function PropertyCard({ item }: PropertyCardProps) {
   const hasElevator = !!(item.elevator);
   const hasAC = !!(item.air_conditioning);
 
-  const { data: favData } = useFavoriteIds();
-  const favIds = new Set(favData?.ids ?? []);
-  const isFav = favIds.has(yad2Id);
-  const toggleFav = useToggleFavorite(yad2Id, isFav);
+  const source = (item.source as string) ?? 'yad2';
+  const matchedSources = (item.matched_sources as string[] | null) ?? [];
+  const allSources = new Set([source, ...matchedSources]);
+
+  const isFav = favoriteIds?.has(yad2Id) ?? false;
 
   const [showViewer, setShowViewer] = useState(false);
 
@@ -74,13 +72,15 @@ export default function PropertyCard({ item }: PropertyCardProps) {
           )}
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          <button
-            onClick={(e) => { e.stopPropagation(); toggleFav.mutate(); }}
-            className="text-lg"
-            title={isFav ? 'Remove from favorites' : 'Add to favorites'}
-          >
-            {isFav ? '⭐' : '☆'}
-          </button>
+          {onToggleFavorite && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggleFavorite(yad2Id, isFav); }}
+              className="text-lg"
+              title={isFav ? 'Remove from favorites' : 'Add to favorites'}
+            >
+              {isFav ? '⭐' : '☆'}
+            </button>
+          )}
           {allSources.has('yad2') && (
             <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">Y2</span>
           )}

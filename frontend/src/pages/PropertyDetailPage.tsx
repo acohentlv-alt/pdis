@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useProperty, useSignals, useEvents, useOperatorInput, useMatches } from '../api/queries';
-import { useWhitelist, useRemoveWhitelist, useBlacklist, useRemoveBlacklist, useToggleFavorite } from '../api/mutations';
+import { useWhitelist, useRemoveWhitelist, useBlacklist, useRemoveBlacklist, useAddFavorite, useRemoveFavorite } from '../api/mutations';
 import { formatPrice, formatPricePerSqm, formatDate, formatDateFull, CLASSIFICATION_STYLES } from '../lib/format';
 import LifecycleTimeline from '../components/LifecycleTimeline';
 import ImageViewer from '../components/ImageViewer';
@@ -99,7 +99,8 @@ export default function PropertyDetailPage() {
   const isWhitelisted = !!(prop.is_whitelisted);
   const isBlacklisted = !!(prop.is_blacklisted);
   const isFavorited = !!(prop.is_favorited);
-  const toggleFav = useToggleFavorite(yad2Id!, isFavorited);
+  const addFav = useAddFavorite();
+  const removeFav = useRemoveFavorite();
 
   const imageUrls = (prop.image_urls as string[] | null) ?? [];
   const yad2DateAdded = prop.yad2_date_added as string | null;
@@ -357,8 +358,8 @@ export default function PropertyDetailPage() {
       <div className="space-y-2 pb-8">
         <div className="flex gap-2">
           <button
-            onClick={() => toggleFav.mutate()}
-            disabled={toggleFav.isPending}
+            onClick={() => isFavorited ? removeFav.mutate(yad2Id!) : addFav.mutate(yad2Id!)}
+            disabled={addFav.isPending || removeFav.isPending}
             className={`flex-1 min-h-[44px] rounded-lg text-sm font-medium border transition-colors disabled:opacity-50 ${
               isFavorited
                 ? 'bg-yellow-50 border-yellow-300 text-yellow-700'

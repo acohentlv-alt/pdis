@@ -1,7 +1,8 @@
 import { useState, useMemo } from 'react';
 import FilterBar from '../components/FilterBar';
 import PropertyCard from '../components/PropertyCard';
-import { useFavorites } from '../api/queries';
+import { useFavorites, useFavoriteIds } from '../api/queries';
+import { useAddFavorite, useRemoveFavorite } from '../api/mutations';
 
 function applyFilters(
   items: Record<string, unknown>[],
@@ -44,6 +45,14 @@ export default function FavoritesPage() {
   const [sortBy, setSortBy] = useState('distress_score');
 
   const { data: favData, isLoading } = useFavorites();
+  const { data: favIdsData } = useFavoriteIds();
+  const favIds = useMemo(() => new Set(favIdsData?.ids ?? []), [favIdsData]);
+  const addFav = useAddFavorite();
+  const removeFav = useRemoveFavorite();
+  const handleToggleFav = (yad2Id: string, isFav: boolean) => {
+    if (isFav) removeFav.mutate(yad2Id);
+    else addFav.mutate(yad2Id);
+  };
 
   const rawItems = useMemo(
     () => (favData?.favorites ?? []) as Record<string, unknown>[],
@@ -90,7 +99,7 @@ export default function FavoritesPage() {
 
       <div className="space-y-3 pb-8">
         {filtered.map(item => (
-          <PropertyCard key={item.yad2_id as string} item={item} />
+          <PropertyCard key={item.yad2_id as string} item={item} favoriteIds={favIds} onToggleFavorite={handleToggleFav} />
         ))}
       </div>
     </div>

@@ -2,7 +2,8 @@ import { useState, useMemo } from 'react';
 import SummaryBar from '../components/SummaryBar';
 import FilterBar from '../components/FilterBar';
 import PropertyCard from '../components/PropertyCard';
-import { useOpportunities, useClassifications } from '../api/queries';
+import { useOpportunities, useClassifications, useFavoriteIds } from '../api/queries';
+import { useAddFavorite, useRemoveFavorite } from '../api/mutations';
 
 type Tab = 'opportunities' | 'fullscan';
 
@@ -54,6 +55,14 @@ export default function HomePage() {
 
   const { data: oppsData, isLoading: oppsLoading } = useOpportunities();
   const { data: classData, isLoading: classLoading } = useClassifications();
+  const { data: favData } = useFavoriteIds();
+  const favIds = useMemo(() => new Set(favData?.ids ?? []), [favData]);
+  const addFav = useAddFavorite();
+  const removeFav = useRemoveFavorite();
+  const handleToggleFav = (yad2Id: string, isFav: boolean) => {
+    if (isFav) removeFav.mutate(yad2Id);
+    else addFav.mutate(yad2Id);
+  };
 
   const rawItems = useMemo(() => {
     if (tab === 'opportunities') {
@@ -131,7 +140,7 @@ export default function HomePage() {
 
       <div className="space-y-3 pb-8">
         {filtered.map(item => (
-          <PropertyCard key={item.yad2_id as string} item={item} />
+          <PropertyCard key={item.yad2_id as string} item={item} favoriteIds={favIds} onToggleFavorite={handleToggleFav} />
         ))}
       </div>
     </div>
