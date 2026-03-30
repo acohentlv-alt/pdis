@@ -18,6 +18,7 @@ class ScrapedListing:
     description: str | None
     contact_name: str | None
     contact_phone: str | None
+    address_home_number: str | None = None
     yad2_date_added: str | None = None  # "2026-03-29 17:24:08" from Yad2
     source: str = "yad2"
     latitude: float | None = None

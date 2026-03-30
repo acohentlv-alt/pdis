@@ -2,7 +2,6 @@ import { useState, useMemo } from 'react';
 import SummaryBar from '../components/SummaryBar';
 import FilterBar from '../components/FilterBar';
 import PropertyCard from '../components/PropertyCard';
-import OpenSearchForm from '../components/OpenSearchForm';
 import { useOpportunities, useClassifications } from '../api/queries';
 
 type Tab = 'opportunities' | 'fullscan';
@@ -43,7 +42,6 @@ function applyFilters(
 
 export default function HomePage() {
   const [tab, setTab] = useState<Tab>('opportunities');
-  const [showSearch, setShowSearch] = useState(false);
   const [neighborhood, setNeighborhood] = useState('');
   const [rooms, setRooms] = useState('');
   const [classification, setClassification] = useState('');
@@ -76,22 +74,7 @@ export default function HomePage() {
             ? '👋 Good afternoon, Shoubidu Properties'
             : '🌙 Good evening, Shoubidu Properties'}
         </h1>
-        <button
-          onClick={() => setShowSearch(v => !v)}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
-            showSearch
-              ? 'bg-gray-900 text-white border-gray-900'
-              : 'bg-white text-gray-700 border-gray-300'
-          }`}
-        >
-          <span>🔍</span>
-          <span>Recherche</span>
-        </button>
       </div>
-
-      {showSearch && (
-        <OpenSearchForm onSuccess={() => setShowSearch(false)} />
-      )}
 
       <SummaryBar />
 

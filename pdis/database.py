@@ -333,6 +333,17 @@ async def run_migrations() -> None:
                 "CREATE INDEX IF NOT EXISTS idx_preset_stats_session ON scan_preset_stats(session_id)"
             )
 
+            # Add address_home_number column
+            await cur.execute(
+                "ALTER TABLE properties ADD COLUMN IF NOT EXISTS address_home_number TEXT"
+            )
+
+            # Backfill address_home_number from raw_data
+            await cur.execute("""
+                UPDATE properties SET address_home_number = raw_data->>'address_home_number'
+                WHERE address_home_number IS NULL AND raw_data->>'address_home_number' IS NOT NULL
+            """)
+
         await conn.commit()
     logger.info("db.migrations_done")
     await seed_presets()

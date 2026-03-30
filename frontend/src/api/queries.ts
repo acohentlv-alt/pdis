@@ -70,3 +70,20 @@ export function useMatches(yad2Id: string | undefined) {
     enabled: !!yad2Id,
   });
 }
+
+export function useOpenSearchPresets() {
+  return useQuery({
+    queryKey: ['openSearchPresets'],
+    queryFn: () => apiFetch<{ presets: Record<string, unknown>[] }>('/api/presets?is_active=false'),
+  });
+}
+
+export function usePropertiesByPreset(presetId: number | null) {
+  return useQuery({
+    queryKey: ['propertiesByPreset', presetId],
+    queryFn: () => apiFetch<{ total: number; properties: Record<string, unknown>[] }>(
+      `/api/properties?preset_id=${presetId}&per_page=500`
+    ),
+    enabled: presetId !== null,
+  });
+}

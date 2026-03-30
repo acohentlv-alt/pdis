@@ -66,6 +66,7 @@ async def _upsert_properties(
                     INSERT INTO properties (
                         yad2_id, preset_id, category,
                         address_street, address_city, neighborhood,
+                        address_home_number,
                         rooms, floor, total_floors, square_meters,
                         price, currency, property_type,
                         description, contact_name, contact_phone,
@@ -79,6 +80,7 @@ async def _upsert_properties(
                     ) VALUES (
                         %(yad2_id)s, %(preset_id)s, %(category)s,
                         %(address_street)s, %(address_city)s, %(neighborhood)s,
+                        %(address_home_number)s,
                         %(rooms)s, %(floor)s, %(total_floors)s, %(square_meters)s,
                         %(price)s, %(currency)s, %(property_type)s,
                         %(description)s, %(contact_name)s, %(contact_phone)s,
@@ -98,6 +100,7 @@ async def _upsert_properties(
                         neighborhood    = EXCLUDED.neighborhood,
                         address_street  = EXCLUDED.address_street,
                         address_city    = EXCLUDED.address_city,
+                        address_home_number = EXCLUDED.address_home_number,
                         rooms           = EXCLUDED.rooms,
                         floor           = EXCLUDED.floor,
                         square_meters   = EXCLUDED.square_meters,
@@ -138,6 +141,7 @@ async def _upsert_properties(
                         "address_street": listing.address_street,
                         "address_city": listing.address_city,
                         "neighborhood": listing.neighborhood,
+                        "address_home_number": listing.address_home_number,
                         "rooms": listing.rooms,
                         "floor": listing.floor,
                         "total_floors": listing.total_floors,

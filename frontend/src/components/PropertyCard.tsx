@@ -49,8 +49,10 @@ export default function PropertyCard({ item }: PropertyCardProps) {
       <div className="flex items-start justify-between gap-2">
         <div dir="rtl" className="text-sm leading-snug">
           <span className="font-semibold text-gray-800">{neighborhood || 'Unknown area'}</span>
-          {item.address_street != null && (
-            <span className="text-gray-500 mr-1">, {String(item.address_street)}</span>
+          {!!(item.address_street || item.address_home_number) && (
+            <span className="text-gray-500 mr-1">
+              , {String(item.address_street || '')}{item.address_home_number ? ` ${String(item.address_home_number)}` : ''}
+            </span>
           )}
         </div>
         <span className={`${style.bg} text-white text-xs px-2 py-0.5 rounded-full font-medium shrink-0`}>

@@ -172,10 +172,13 @@ def _parse_listing(item: dict, category: str = "rent") -> ScrapedListing | None:
 
     customer_id = str(item["customer_id"]) if item.get("customer_id") is not None else None
 
+    address_home_number = str(item["address_home_number"]) if item.get("address_home_number") is not None else None
+
     return ScrapedListing(
         yad2_id=str(yad2_id),
         category=category,
         address_street=item.get("street"),
+        address_home_number=address_home_number,
         address_city=item.get("city"),
         neighborhood=item.get("neighborhood"),
         rooms=rooms,

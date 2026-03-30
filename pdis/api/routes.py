@@ -35,10 +35,16 @@ async def health():
 # ---------------------------------------------------------------------------
 
 @router.get("/api/presets")
-async def list_presets():
+async def list_presets(is_active: bool | None = Query(default=None)):
     async with _db.pool.connection() as conn:
         async with conn.cursor() as cur:
-            await cur.execute("SELECT * FROM search_presets ORDER BY id")
+            if is_active is not None:
+                await cur.execute(
+                    "SELECT * FROM search_presets WHERE is_active = %s ORDER BY created_at DESC",
+                    (is_active,),
+                )
+            else:
+                await cur.execute("SELECT * FROM search_presets ORDER BY id")
             rows = await cur.fetchall()
     return {"presets": [dict(r) for r in rows]}
 
@@ -706,7 +712,7 @@ async def list_classifications(
             await cur.execute(
                 f"""
                 SELECT pc.*, p.yad2_id, p.address_street, p.address_city,
-                       p.price, p.rooms, p.neighborhood, p.days_on_market,
+                       p.address_home_number, p.price, p.rooms, p.neighborhood, p.days_on_market,
                        p.square_meters, p.image_urls, p.listing_url,
                        p.is_agent, p.parking, p.elevator, p.air_conditioning
                 FROM property_classifications pc
