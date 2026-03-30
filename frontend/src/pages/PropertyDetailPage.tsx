@@ -262,6 +262,36 @@ export default function PropertyDetailPage() {
         )}
       </Section>
 
+      {/* Listing Description */}
+      {prop.description && (
+        <Section title="Listing Description">
+          <p dir="rtl" className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
+            {String(prop.description)}
+          </p>
+        </Section>
+      )}
+
+      {/* Contact Info */}
+      <Section title="Contact">
+        <div className="text-sm space-y-1">
+          {prop.contact_name && (
+            <div className="text-gray-800">
+              <span className="text-gray-500">Name: </span>
+              <span dir="rtl" className="font-medium">{String(prop.contact_name)}</span>
+            </div>
+          )}
+          {isAgent && agentOffice && (
+            <div className="text-gray-800">
+              <span className="text-gray-500">Agency: </span>
+              <span dir="rtl" className="font-medium">{agentOffice}</span>
+            </div>
+          )}
+          {!prop.contact_name && !agentOffice && (
+            <div className="text-gray-400 text-xs">No contact info available from listing feed</div>
+          )}
+        </div>
+      </Section>
+
       {/* Lifecycle Timeline */}
       <Section title="Timeline">
         <LifecycleTimeline events={events} />
