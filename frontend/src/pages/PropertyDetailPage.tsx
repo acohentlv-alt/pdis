@@ -55,7 +55,6 @@ export default function PropertyDetailPage() {
 
   const classification = (prop.classification as Record<string, unknown> | null);
   const cls = (classification?.classification as string) ?? 'cold';
-  const score = (classification?.distress_score as number) ?? 0;
   const sd = (classification?.signal_details as Record<string, unknown>) ?? {};
   const style = CLASSIFICATION_STYLES[cls] ?? CLASSIFICATION_STYLES.cold;
 
@@ -150,7 +149,6 @@ export default function PropertyDetailPage() {
         <div className="text-sm text-gray-500 flex gap-3">
           {sqm && <span>{sqm}m²</span>}
           <span>{formatPricePerSqm(price, sqm)}</span>
-          <span>Score: {score.toFixed(1)}</span>
         </div>
       </div>
 
