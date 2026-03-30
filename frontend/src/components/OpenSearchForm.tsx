@@ -51,7 +51,7 @@ export default function OpenSearchForm({ onSuccess }: Props) {
       <div className="grid grid-cols-2 gap-3">
         {/* City */}
         <div className="col-span-2">
-          <label className="block text-xs font-medium text-gray-500 mb-1">Ville</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">City</label>
           <select
             value={cityCode}
             disabled
@@ -69,53 +69,53 @@ export default function OpenSearchForm({ onSuccess }: Props) {
             onChange={e => setCategory(e.target.value)}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
           >
-            <option value="rent">Location</option>
-            <option value="sale">Vente</option>
+            <option value="rent">Rent</option>
+            <option value="sale">Sale</option>
           </select>
         </div>
 
         {/* Price */}
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Prix min (₪)</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">Min price (₪)</label>
           <input
             type="number"
             value={minPrice}
             onChange={e => setMinPrice(e.target.value)}
-            placeholder="ex: 5000"
+            placeholder="e.g. 5000"
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
           />
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Prix max (₪)</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">Max price (₪)</label>
           <input
             type="number"
             value={maxPrice}
             onChange={e => setMaxPrice(e.target.value)}
-            placeholder="ex: 10000"
+            placeholder="e.g. 10000"
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
           />
         </div>
 
         {/* Rooms */}
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Pièces min</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">Min rooms</label>
           <input
             type="number"
             step="0.5"
             value={minRooms}
             onChange={e => setMinRooms(e.target.value)}
-            placeholder="ex: 2"
+            placeholder="e.g. 2"
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
           />
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Pièces max</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">Max rooms</label>
           <input
             type="number"
             step="0.5"
             value={maxRooms}
             onChange={e => setMaxRooms(e.target.value)}
-            placeholder="ex: 4"
+            placeholder="e.g. 4"
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
           />
         </div>
@@ -126,28 +126,28 @@ export default function OpenSearchForm({ onSuccess }: Props) {
         disabled={mutation.isPending}
         className="w-full min-h-[44px] bg-gray-900 text-white rounded-lg text-sm font-medium disabled:opacity-60 transition-opacity"
       >
-        {mutation.isPending ? 'Scan en cours…' : 'Lancer la recherche'}
+        {mutation.isPending ? 'Scanning...' : 'Run Search'}
       </button>
 
       {mutation.isPending && (
         <p className="text-xs text-center text-gray-400">
-          Scan Yad2 en cours, cela prend environ une minute…
+          Scanning Yad2, this takes about a minute...
         </p>
       )}
 
       {mutation.isError && (
         <p className="text-xs text-center text-red-500">
-          Erreur lors du scan. Veuillez réessayer.
+          Scan failed. Please try again.
         </p>
       )}
 
       {result !== null && (
         <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3 text-sm text-green-800 text-center">
-          Scan terminé —{' '}
+          Scan complete —{' '}
           {result.new_listings !== undefined
-            ? `${result.new_listings} nouvelles annonces`
-            : 'résultats disponibles'}
-          {result.total_active !== undefined && ` (${result.total_active} actives au total)`}
+            ? `${result.new_listings} new listings found`
+            : 'results available'}
+          {result.total_active !== undefined && ` (${result.total_active} total active)`}
         </div>
       )}
     </form>

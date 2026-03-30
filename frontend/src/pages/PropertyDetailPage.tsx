@@ -309,19 +309,19 @@ export default function PropertyDetailPage() {
 
       {/* Matches */}
       {matches.length > 0 && (
-        <Section title="Doublons détectés">
+        <Section title="Duplicates Detected">
           <div className="space-y-2">
             {matches.map((m) => {
               const tier = m.match_tier as number;
               const matched = m.matched_property as Record<string, unknown> | null;
               const tierBadge =
                 tier === 0
-                  ? <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">Même propriétaire</span>
+                  ? <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">Same landlord</span>
                   : tier === 1
-                  ? <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">Même immeuble</span>
+                  ? <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">Same building</span>
                   : tier === 2
-                  ? <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">Bien similaire</span>
-                  : <span className="text-xs bg-gray-50 text-gray-400 px-2 py-0.5 rounded-full font-medium">Correspondance possible</span>;
+                  ? <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">Similar property</span>
+                  : <span className="text-xs bg-gray-50 text-gray-400 px-2 py-0.5 rounded-full font-medium">Possible match</span>;
 
               return (
                 <div key={m.id as number} className="flex items-center justify-between gap-2 text-sm">
