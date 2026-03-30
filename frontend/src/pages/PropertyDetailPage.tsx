@@ -1,7 +1,7 @@
 import { useNavigate, useParams } from 'react-router-dom';
 import { useProperty, useSignals, useEvents, useOperatorInput } from '../api/queries';
 import { useWhitelist, useRemoveWhitelist, useBlacklist, useRemoveBlacklist } from '../api/mutations';
-import { formatPrice, formatPricePerSqm, formatDate, CLASSIFICATION_STYLES } from '../lib/format';
+import { formatPrice, formatPricePerSqm, formatDate, formatDateFull, CLASSIFICATION_STYLES } from '../lib/format';
 import LifecycleTimeline from '../components/LifecycleTimeline';
 import OperatorInputForm from '../components/OperatorInputForm';
 import NotesList from '../components/NotesList';
@@ -94,6 +94,9 @@ export default function PropertyDetailPage() {
   const isWhitelisted = !!(prop.is_whitelisted);
   const isBlacklisted = !!(prop.is_blacklisted);
 
+  const imageUrls = (prop.image_urls as string[] | null) ?? [];
+  const yad2DateAdded = prop.yad2_date_added as string | null;
+
   return (
     <div className="max-w-lg mx-auto px-4 py-4 space-y-4">
       <button
@@ -102,6 +105,31 @@ export default function PropertyDetailPage() {
       >
         ← Back
       </button>
+
+      {/* Hero image */}
+      {imageUrls.length > 0 && (
+        <div className="rounded-xl overflow-hidden">
+          <img
+            src={imageUrls[0]}
+            alt=""
+            className="w-full h-56 object-cover"
+            loading="lazy"
+          />
+          {imageUrls.length > 1 && (
+            <div className="flex gap-2 overflow-x-auto bg-gray-100 p-2">
+              {imageUrls.slice(1).map((url, i) => (
+                <img
+                  key={i}
+                  src={url}
+                  alt=""
+                  className="h-16 w-24 object-cover rounded shrink-0"
+                  loading="lazy"
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Header */}
       <div className="bg-white rounded-xl shadow p-4 space-y-1">
@@ -173,7 +201,12 @@ export default function PropertyDetailPage() {
         <div className="text-sm text-gray-600 border-t pt-2 mt-1">
           Listing attempts: <span className="font-medium">{attempts}</span>
         </div>
-        {!!prop.first_seen && (
+        {yad2DateAdded && (
+          <div className="text-xs text-gray-400">
+            Listed on Yad2: {formatDateFull(yad2DateAdded)} · Days on market: {dom} (from Yad2 data)
+          </div>
+        )}
+        {!yad2DateAdded && !!prop.first_seen && (
           <div className="text-xs text-gray-400">
             First seen: {formatDate(prop.first_seen as string)}
           </div>

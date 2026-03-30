@@ -69,14 +69,16 @@ async def _upsert_properties(
                         rooms, floor, total_floors, square_meters,
                         price, currency, property_type,
                         description, contact_name, contact_phone,
-                        image_urls, listing_url, raw_data
+                        image_urls, listing_url, raw_data,
+                        yad2_date_added
                     ) VALUES (
                         %(yad2_id)s, %(preset_id)s, %(category)s,
                         %(address_street)s, %(address_city)s, %(neighborhood)s,
                         %(rooms)s, %(floor)s, %(total_floors)s, %(square_meters)s,
                         %(price)s, %(currency)s, %(property_type)s,
                         %(description)s, %(contact_name)s, %(contact_phone)s,
-                        %(image_urls)s, %(listing_url)s, %(raw_data)s::jsonb
+                        %(image_urls)s, %(listing_url)s, %(raw_data)s::jsonb,
+                        %(yad2_date_added)s
                     )
                     ON CONFLICT (yad2_id) DO UPDATE SET
                         price           = EXCLUDED.price,
@@ -91,7 +93,12 @@ async def _upsert_properties(
                         square_meters   = EXCLUDED.square_meters,
                         property_type   = EXCLUDED.property_type,
                         last_seen       = CURRENT_DATE,
-                        days_on_market  = CURRENT_DATE - properties.first_seen,
+                        yad2_date_added = COALESCE(EXCLUDED.yad2_date_added, properties.yad2_date_added),
+                        days_on_market  = CASE
+                            WHEN EXCLUDED.yad2_date_added IS NOT NULL THEN CURRENT_DATE - EXCLUDED.yad2_date_added::date
+                            WHEN properties.yad2_date_added IS NOT NULL THEN CURRENT_DATE - properties.yad2_date_added::date
+                            ELSE CURRENT_DATE - properties.first_seen
+                        END,
                         raw_data        = EXCLUDED.raw_data,
                         is_active       = TRUE,
                         updated_at      = NOW()
@@ -117,6 +124,7 @@ async def _upsert_properties(
                         "image_urls": image_urls_val,
                         "listing_url": listing.listing_url,
                         "raw_data": raw_data_val,
+                        "yad2_date_added": listing.yad2_date_added,
                     },
                 )
                 row = await cur.fetchone()

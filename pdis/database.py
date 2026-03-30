@@ -258,6 +258,20 @@ async def run_migrations() -> None:
                 )
             """)
 
+            # Add yad2_date_added column if not present
+            await cur.execute(
+                "ALTER TABLE properties ADD COLUMN IF NOT EXISTS yad2_date_added TIMESTAMPTZ"
+            )
+
+            # Backfill yad2_date_added from raw_data for existing properties
+            await cur.execute("""
+                UPDATE properties
+                SET yad2_date_added = (raw_data->>'date_added')::timestamptz,
+                    days_on_market = CURRENT_DATE - (raw_data->>'date_added')::date
+                WHERE raw_data->>'date_added' IS NOT NULL
+                AND yad2_date_added IS NULL
+            """)
+
             await cur.execute("""
                 CREATE TABLE IF NOT EXISTS property_operator_input (
                     id              SERIAL PRIMARY KEY,

@@ -13,6 +13,11 @@ export function formatDate(iso: string): string {
   return `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth() + 1).toString().padStart(2, '0')}`;
 }
 
+export function formatDateFull(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth() + 1).toString().padStart(2, '0')}.${d.getFullYear()}`;
+}
+
 export const EVENT_LABELS: Record<string, string> = {
   new_listing: "First listed",
   price_drop: "Price drop",

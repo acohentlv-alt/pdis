@@ -18,6 +18,7 @@ class ScrapedListing:
     description: str | None
     contact_name: str | None
     contact_phone: str | None
+    yad2_date_added: str | None = None  # "2026-03-29 17:24:08" from Yad2
     image_urls: list[str] = field(default_factory=list)
     listing_url: str = ""
     raw_data: dict = field(default_factory=dict)

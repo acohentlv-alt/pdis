@@ -115,6 +115,9 @@ def _parse_listing(item: dict, category: str = "rent") -> ScrapedListing | None:
     property_type_he = item.get("HomeTypeID_text") or item.get("title_2")
     property_type = PROPERTY_TYPE_MAP.get(property_type_he, property_type_he)
 
+    # Yad2 upload date
+    yad2_date_added = item.get("date_added")
+
     # Images
     image_urls: list[str] = item.get("images_urls") or []
 
@@ -141,6 +144,7 @@ def _parse_listing(item: dict, category: str = "rent") -> ScrapedListing | None:
         description=description,
         contact_name=item.get("contact_name"),
         contact_phone=None,  # Phone not exposed in feed index, requires separate call
+        yad2_date_added=yad2_date_added,
         image_urls=image_urls,
         listing_url=listing_url,
         raw_data=item,

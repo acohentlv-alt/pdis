@@ -29,8 +29,19 @@ export default function PropertyCard({ item }: PropertyCardProps) {
   const longListed = dom > 60;
   const weakLanguage = Array.isArray(sd.weak_language_found) && (sd.weak_language_found as unknown[]).length > 0;
 
+  const imageUrls = (item.image_urls as string[] | null) ?? [];
+
   return (
-    <div className="bg-white rounded-xl shadow p-4 space-y-2">
+    <div className="bg-white rounded-xl shadow overflow-hidden">
+      {imageUrls.length > 0 && (
+        <img
+          src={imageUrls[0]}
+          alt=""
+          className="w-full h-40 object-cover"
+          loading="lazy"
+        />
+      )}
+      <div className="p-4 space-y-2">
       <div className="flex items-start justify-between gap-2">
         <span dir="rtl" className="font-semibold text-gray-800 text-sm leading-snug">
           {neighborhood || 'Unknown area'}
@@ -82,6 +93,7 @@ export default function PropertyCard({ item }: PropertyCardProps) {
             Source →
           </button>
         )}
+      </div>
       </div>
     </div>
   );
