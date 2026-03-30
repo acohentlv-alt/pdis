@@ -87,3 +87,17 @@ export function usePropertiesByPreset(presetId: number | null) {
     enabled: presetId !== null,
   });
 }
+
+export function useFavoriteIds() {
+  return useQuery({
+    queryKey: ['favoriteIds'],
+    queryFn: () => apiFetch<{ ids: string[] }>('/api/favorites/ids'),
+  });
+}
+
+export function useFavorites() {
+  return useQuery({
+    queryKey: ['favorites'],
+    queryFn: () => apiFetch<{ total: number; favorites: Record<string, unknown>[] }>('/api/favorites'),
+  });
+}

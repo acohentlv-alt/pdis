@@ -211,6 +211,14 @@ async def run_migrations() -> None:
             """)
 
             await cur.execute("""
+                CREATE TABLE IF NOT EXISTS favorites (
+                    id              SERIAL PRIMARY KEY,
+                    property_id     INTEGER NOT NULL UNIQUE REFERENCES properties(id),
+                    created_at      TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+
+            await cur.execute("""
                 CREATE TABLE IF NOT EXISTS property_matches (
                     id              SERIAL PRIMARY KEY,
                     property_id_a   INTEGER NOT NULL REFERENCES properties(id),

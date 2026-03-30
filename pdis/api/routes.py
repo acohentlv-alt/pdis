@@ -322,6 +322,8 @@ async def get_property(yad2_id: str):
             is_whitelisted = await cur.fetchone() is not None
             await cur.execute("SELECT 1 FROM blacklist WHERE property_id = %s", (prop["id"],))
             is_blacklisted = await cur.fetchone() is not None
+            await cur.execute("SELECT 1 FROM favorites WHERE property_id = %s", (prop["id"],))
+            is_favorited = await cur.fetchone() is not None
 
     result = dict(prop)
     result["snapshots"] = [dict(s) for s in snapshots]
@@ -330,6 +332,7 @@ async def get_property(yad2_id: str):
     result["matches"] = matches
     result["is_whitelisted"] = is_whitelisted
     result["is_blacklisted"] = is_blacklisted
+    result["is_favorited"] = is_favorited
     return result
 
 
@@ -898,6 +901,75 @@ async def remove_from_blacklist(yad2_id: str):
         await conn.commit()
 
     await classify_batch([property_id])
+    return {"status": "removed"}
+
+
+# ---------------------------------------------------------------------------
+# Favorites
+# IMPORTANT: /api/favorites/ids must be registered BEFORE /api/favorites/{yad2_id}
+# ---------------------------------------------------------------------------
+
+@router.get("/api/favorites/ids")
+async def list_favorite_ids():
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("""
+                SELECT p.yad2_id FROM favorites f
+                JOIN properties p ON p.id = f.property_id
+            """)
+            rows = await cur.fetchall()
+    return {"ids": [r["yad2_id"] for r in rows]}
+
+
+@router.get("/api/favorites")
+async def list_favorites():
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("""
+                SELECT p.*, pc.classification, pc.distress_score, pc.signal_details,
+                       p.source,
+                       (SELECT ARRAY_AGG(DISTINCT p2.source)
+                        FROM property_matches pm
+                        JOIN properties p2 ON p2.id = CASE
+                            WHEN pm.property_id_a = p.id THEN pm.property_id_b
+                            ELSE pm.property_id_a END
+                        WHERE pm.property_id_a = p.id OR pm.property_id_b = p.id
+                       ) AS matched_sources
+                FROM favorites f
+                JOIN properties p ON p.id = f.property_id
+                LEFT JOIN property_classifications pc ON pc.property_id = p.id
+                ORDER BY f.created_at DESC
+            """)
+            rows = await cur.fetchall()
+    return {"total": len(rows), "favorites": [dict(r) for r in rows]}
+
+
+@router.post("/api/favorites/{yad2_id}")
+async def add_favorite(yad2_id: str):
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT id FROM properties WHERE yad2_id = %s", (yad2_id,))
+            prop = await cur.fetchone()
+            if not prop:
+                raise HTTPException(status_code=404, detail="Property not found")
+            await cur.execute(
+                "INSERT INTO favorites (property_id) VALUES (%s) ON CONFLICT DO NOTHING",
+                (prop["id"],),
+            )
+        await conn.commit()
+    return {"status": "added", "property_id": prop["id"]}
+
+
+@router.delete("/api/favorites/{yad2_id}")
+async def remove_favorite(yad2_id: str):
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT id FROM properties WHERE yad2_id = %s", (yad2_id,))
+            prop = await cur.fetchone()
+            if not prop:
+                raise HTTPException(status_code=404, detail="Property not found")
+            await cur.execute("DELETE FROM favorites WHERE property_id = %s", (prop["id"],))
+        await conn.commit()
     return {"status": "removed"}
 
 

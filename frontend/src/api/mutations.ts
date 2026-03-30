@@ -100,6 +100,20 @@ export function useOpenSearch() {
   });
 }
 
+export function useToggleFavorite(yad2Id: string, isFavorited: boolean) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch(`/api/favorites/${yad2Id}`, {
+      method: isFavorited ? 'DELETE' : 'POST',
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['favoriteIds'] });
+      queryClient.invalidateQueries({ queryKey: ['favorites'] });
+      queryClient.invalidateQueries({ queryKey: ['property', yad2Id] });
+    },
+  });
+}
+
 export function useSaveOperatorInput(yad2Id: string) {
   const qc = useQueryClient();
   return useMutation({

@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { formatPrice, formatPricePerSqm, CLASSIFICATION_STYLES } from '../lib/format';
 import ImageViewer from './ImageViewer';
+import { useFavoriteIds } from '../api/queries';
+import { useToggleFavorite } from '../api/mutations';
 
 interface PropertyCardProps {
   item: Record<string, unknown>;
@@ -40,6 +42,11 @@ export default function PropertyCard({ item }: PropertyCardProps) {
   const hasElevator = !!(item.elevator);
   const hasAC = !!(item.air_conditioning);
 
+  const { data: favData } = useFavoriteIds();
+  const favIds = new Set(favData?.ids ?? []);
+  const isFav = favIds.has(yad2Id);
+  const toggleFav = useToggleFavorite(yad2Id, isFav);
+
   const [showViewer, setShowViewer] = useState(false);
 
   return (
@@ -67,6 +74,13 @@ export default function PropertyCard({ item }: PropertyCardProps) {
           )}
         </div>
         <div className="flex items-center gap-1 shrink-0">
+          <button
+            onClick={(e) => { e.stopPropagation(); toggleFav.mutate(); }}
+            className="text-lg"
+            title={isFav ? 'Remove from favorites' : 'Add to favorites'}
+          >
+            {isFav ? '⭐' : '☆'}
+          </button>
           {allSources.has('yad2') && (
             <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">Y2</span>
           )}
