@@ -47,6 +47,8 @@ export default function PropertyDetailPage() {
   const removeWhitelist = useRemoveWhitelist(yad2Id!);
   const blacklist = useBlacklist(yad2Id!);
   const removeBlacklist = useRemoveBlacklist(yad2Id!);
+  const addFav = useAddFavorite();
+  const removeFav = useRemoveFavorite();
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerStartIndex, setViewerStartIndex] = useState(0);
 
@@ -99,8 +101,6 @@ export default function PropertyDetailPage() {
   const isWhitelisted = !!(prop.is_whitelisted);
   const isBlacklisted = !!(prop.is_blacklisted);
   const isFavorited = !!(prop.is_favorited);
-  const addFav = useAddFavorite();
-  const removeFav = useRemoveFavorite();
 
   const imageUrls = (prop.image_urls as string[] | null) ?? [];
   const yad2DateAdded = prop.yad2_date_added as string | null;
