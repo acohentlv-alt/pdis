@@ -30,6 +30,10 @@ export default function PropertyCard({ item }: PropertyCardProps) {
   const weakLanguage = Array.isArray(sd.weak_language_found) && (sd.weak_language_found as unknown[]).length > 0;
 
   const imageUrls = (item.image_urls as string[] | null) ?? [];
+  const isAgent = !!(item.is_agent);
+  const hasParking = !!(item.parking);
+  const hasElevator = !!(item.elevator);
+  const hasAC = !!(item.air_conditioning);
 
   return (
     <div className="bg-white rounded-xl shadow overflow-hidden">
@@ -64,6 +68,9 @@ export default function PropertyCard({ item }: PropertyCardProps) {
       )}
 
       <div className="flex flex-wrap gap-1">
+        {isAgent && (
+          <span className="text-xs bg-purple-50 text-purple-600 px-2 py-0.5 rounded-full">Agent</span>
+        )}
         {priceDrop && (
           <span className="text-xs bg-red-50 text-red-600 px-2 py-0.5 rounded-full">📉 Price drop</span>
         )}
@@ -77,6 +84,14 @@ export default function PropertyCard({ item }: PropertyCardProps) {
           <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">💬 Weak language</span>
         )}
       </div>
+
+      {(hasParking || hasElevator || hasAC) && (
+        <div className="flex gap-2 text-xs text-gray-400">
+          {hasParking && <span>🅿️ Parking</span>}
+          {hasElevator && <span>🛗 Elevator</span>}
+          {hasAC && <span>❄️ AC</span>}
+        </div>
+      )}
 
       <div className="flex gap-2 pt-1">
         <button

@@ -70,7 +70,12 @@ async def _upsert_properties(
                         price, currency, property_type,
                         description, contact_name, contact_phone,
                         image_urls, listing_url, raw_data,
-                        yad2_date_added
+                        yad2_date_added,
+                        source, latitude, longitude,
+                        parking, elevator, safe_room, renovated, balcony,
+                        pets_allowed, furnished, air_conditioning,
+                        is_agent, agent_office, move_in_date,
+                        hood_id, customer_id, accessibility
                     ) VALUES (
                         %(yad2_id)s, %(preset_id)s, %(category)s,
                         %(address_street)s, %(address_city)s, %(neighborhood)s,
@@ -78,7 +83,12 @@ async def _upsert_properties(
                         %(price)s, %(currency)s, %(property_type)s,
                         %(description)s, %(contact_name)s, %(contact_phone)s,
                         %(image_urls)s, %(listing_url)s, %(raw_data)s::jsonb,
-                        %(yad2_date_added)s
+                        %(yad2_date_added)s,
+                        %(source)s, %(latitude)s, %(longitude)s,
+                        %(parking)s, %(elevator)s, %(safe_room)s, %(renovated)s, %(balcony)s,
+                        %(pets_allowed)s, %(furnished)s, %(air_conditioning)s,
+                        %(is_agent)s, %(agent_office)s, %(move_in_date)s,
+                        %(hood_id)s, %(customer_id)s, %(accessibility)s
                     )
                     ON CONFLICT (yad2_id) DO UPDATE SET
                         price           = EXCLUDED.price,
@@ -101,7 +111,24 @@ async def _upsert_properties(
                         END,
                         raw_data        = EXCLUDED.raw_data,
                         is_active       = TRUE,
-                        updated_at      = NOW()
+                        updated_at      = NOW(),
+                        source          = EXCLUDED.source,
+                        latitude        = COALESCE(EXCLUDED.latitude, properties.latitude),
+                        longitude       = COALESCE(EXCLUDED.longitude, properties.longitude),
+                        parking         = EXCLUDED.parking,
+                        elevator        = EXCLUDED.elevator,
+                        safe_room       = EXCLUDED.safe_room,
+                        renovated       = EXCLUDED.renovated,
+                        balcony         = EXCLUDED.balcony,
+                        pets_allowed    = EXCLUDED.pets_allowed,
+                        furnished       = EXCLUDED.furnished,
+                        air_conditioning = EXCLUDED.air_conditioning,
+                        is_agent        = EXCLUDED.is_agent,
+                        agent_office    = EXCLUDED.agent_office,
+                        move_in_date    = EXCLUDED.move_in_date,
+                        hood_id         = EXCLUDED.hood_id,
+                        customer_id     = EXCLUDED.customer_id,
+                        accessibility   = EXCLUDED.accessibility
                     RETURNING (xmax = 0) AS is_insert
                     """,
                     {
@@ -125,6 +152,23 @@ async def _upsert_properties(
                         "listing_url": listing.listing_url,
                         "raw_data": raw_data_val,
                         "yad2_date_added": listing.yad2_date_added,
+                        "source": listing.source,
+                        "latitude": listing.latitude,
+                        "longitude": listing.longitude,
+                        "parking": listing.parking,
+                        "elevator": listing.elevator,
+                        "safe_room": listing.safe_room,
+                        "renovated": listing.renovated,
+                        "balcony": listing.balcony,
+                        "pets_allowed": listing.pets_allowed,
+                        "furnished": listing.furnished,
+                        "air_conditioning": listing.air_conditioning,
+                        "is_agent": listing.is_agent,
+                        "agent_office": listing.agent_office,
+                        "move_in_date": listing.move_in_date,
+                        "hood_id": listing.hood_id,
+                        "customer_id": listing.customer_id,
+                        "accessibility": listing.accessibility,
                     },
                 )
                 row = await cur.fetchone()

@@ -96,6 +96,23 @@ export default function PropertyDetailPage() {
   const imageUrls = (prop.image_urls as string[] | null) ?? [];
   const yad2DateAdded = prop.yad2_date_added as string | null;
 
+  const isAgent = !!(prop.is_agent);
+  const agentOffice = prop.agent_office as string | null;
+  const moveInDate = prop.move_in_date as string | null;
+  const source = (prop.source as string) ?? 'yad2';
+
+  const amenities = [
+    { key: 'parking', label: 'Parking', active: !!(prop.parking) },
+    { key: 'elevator', label: 'Elevator', active: !!(prop.elevator) },
+    { key: 'safe_room', label: 'Safe room', active: !!(prop.safe_room) },
+    { key: 'renovated', label: 'Renovated', active: !!(prop.renovated) },
+    { key: 'balcony', label: 'Balcony', active: !!(prop.balcony) },
+    { key: 'pets_allowed', label: 'Pets', active: !!(prop.pets_allowed) },
+    { key: 'furnished', label: 'Furnished', active: !!(prop.furnished) },
+    { key: 'air_conditioning', label: 'AC', active: !!(prop.air_conditioning) },
+    { key: 'accessibility', label: 'Accessible', active: !!(prop.accessibility) },
+  ];
+
   return (
     <div className="max-w-lg mx-auto px-4 py-4 space-y-4">
       <button
@@ -141,9 +158,14 @@ export default function PropertyDetailPage() {
               {(prop.address_street as string) || ''}
             </span>
           </div>
-          <span className={`${style.bg} text-white text-xs px-2 py-0.5 rounded-full font-medium shrink-0`}>
-            {style.icon} {style.label}
-          </span>
+          <div className="flex gap-1 shrink-0">
+            <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">
+              {source === 'yad2' ? 'Yad2' : source}
+            </span>
+            <span className={`${style.bg} text-white text-xs px-2 py-0.5 rounded-full font-medium`}>
+              {style.icon} {style.label}
+            </span>
+          </div>
         </div>
         <div className="text-2xl font-bold text-gray-900">{formatPrice(price)}</div>
         <div className="text-sm text-gray-500 flex gap-3">
@@ -151,6 +173,33 @@ export default function PropertyDetailPage() {
           <span>{formatPricePerSqm(price, sqm)}</span>
         </div>
       </div>
+
+      {/* Details */}
+      <Section title="Details">
+        <div className="grid grid-cols-3 gap-2">
+          {amenities.map(a => (
+            <div key={a.key} className="flex items-center gap-1 text-sm">
+              <span className={a.active ? 'text-green-500' : 'text-gray-300'}>{a.active ? '✓' : '✗'}</span>
+              <span className={a.active ? 'text-gray-800' : 'text-gray-400'}>{a.label}</span>
+            </div>
+          ))}
+        </div>
+        {isAgent && agentOffice && (
+          <div className="text-sm text-gray-600 border-t pt-2 mt-2">
+            Listed by: <span className="font-medium">{agentOffice}</span>
+          </div>
+        )}
+        {moveInDate && (
+          <div className="text-sm text-gray-600">
+            Move-in: <span className="font-medium">{formatDateFull(moveInDate)}</span>
+          </div>
+        )}
+        <div className="mt-1">
+          <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">
+            {source === 'yad2' ? 'Yad2' : source}
+          </span>
+        </div>
+      </Section>
 
       {/* Summary */}
       {summaryParts.length > 0 && (

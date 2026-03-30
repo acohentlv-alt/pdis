@@ -662,7 +662,9 @@ async def list_classifications(
             await cur.execute(
                 f"""
                 SELECT pc.*, p.yad2_id, p.address_street, p.address_city,
-                       p.price, p.rooms, p.neighborhood, p.days_on_market
+                       p.price, p.rooms, p.neighborhood, p.days_on_market,
+                       p.square_meters, p.image_urls, p.listing_url,
+                       p.is_agent, p.parking, p.elevator, p.air_conditioning
                 FROM property_classifications pc
                 JOIN properties p ON p.id = pc.property_id
                 {where}

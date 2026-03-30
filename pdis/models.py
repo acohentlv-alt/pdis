@@ -19,6 +19,23 @@ class ScrapedListing:
     contact_name: str | None
     contact_phone: str | None
     yad2_date_added: str | None = None  # "2026-03-29 17:24:08" from Yad2
+    source: str = "yad2"
+    latitude: float | None = None
+    longitude: float | None = None
+    parking: bool = False
+    elevator: bool = False
+    safe_room: bool = False
+    renovated: bool = False
+    balcony: bool = False
+    pets_allowed: bool = False
+    furnished: bool = False
+    air_conditioning: bool = False
+    is_agent: bool = False
+    agent_office: str | None = None
+    move_in_date: str | None = None
+    hood_id: int | None = None
+    customer_id: str | None = None
+    accessibility: bool = False
     image_urls: list[str] = field(default_factory=list)
     listing_url: str = ""
     raw_data: dict = field(default_factory=dict)

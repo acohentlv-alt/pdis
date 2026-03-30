@@ -272,6 +272,52 @@ async def run_migrations() -> None:
                 AND yad2_date_added IS NULL
             """)
 
+            # Add new enrichment columns
+            for col_def in [
+                "source TEXT DEFAULT 'yad2'",
+                "latitude REAL",
+                "longitude REAL",
+                "parking BOOLEAN",
+                "elevator BOOLEAN",
+                "safe_room BOOLEAN",
+                "renovated BOOLEAN",
+                "balcony BOOLEAN",
+                "pets_allowed BOOLEAN",
+                "furnished BOOLEAN",
+                "air_conditioning BOOLEAN",
+                "is_agent BOOLEAN",
+                "agent_office TEXT",
+                "move_in_date DATE",
+                "hood_id INTEGER",
+                "customer_id TEXT",
+                "accessibility BOOLEAN",
+            ]:
+                await cur.execute(f"ALTER TABLE properties ADD COLUMN IF NOT EXISTS {col_def}")
+
+            # Backfill enrichment columns from raw_data for existing properties
+            await cur.execute("""
+                UPDATE properties SET
+                    source = 'yad2',
+                    latitude = (raw_data->'coordinates'->>'latitude')::real,
+                    longitude = (raw_data->'coordinates'->>'longitude')::real,
+                    parking = COALESCE(raw_data->>'Parking_text', '') != '',
+                    elevator = COALESCE(raw_data->>'Elevator_text', '') != '',
+                    safe_room = COALESCE(raw_data->>'mamad_text', '') != '',
+                    renovated = COALESCE(raw_data->>'Meshupatz_text', '') != '',
+                    balcony = COALESCE(raw_data->>'Porch_text', '') != '' AND COALESCE(raw_data->>'Porch_text', '') != 'אין',
+                    pets_allowed = COALESCE(raw_data->>'PetsInHouse_text', '') != '',
+                    furnished = COALESCE(raw_data->>'Furniture_text', '') != '',
+                    air_conditioning = COALESCE(raw_data->>'AirConditioner_text', '') != '',
+                    is_agent = COALESCE((raw_data->>'merchant')::boolean, false),
+                    agent_office = raw_data->>'merchant_name',
+                    move_in_date = CASE WHEN raw_data->>'date_of_entry' IS NOT NULL AND raw_data->>'date_of_entry' != ''
+                                   THEN (raw_data->>'date_of_entry')::date ELSE NULL END,
+                    hood_id = (raw_data->>'hood_id')::integer,
+                    customer_id = raw_data->>'customer_id',
+                    accessibility = COALESCE(raw_data->>'handicapped_text', '') != ''
+                WHERE source IS NULL OR latitude IS NULL
+            """)
+
             await cur.execute("""
                 CREATE TABLE IF NOT EXISTS property_operator_input (
                     id              SERIAL PRIMARY KEY,

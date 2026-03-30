@@ -45,6 +45,11 @@ PROPERTY_TYPE_MAP = {
 }
 
 
+def _bool_field(item: dict, key: str) -> bool:
+    val = item.get(key)
+    return bool(val) and str(val).strip() != ""
+
+
 def _parse_price(raw_price: Any) -> int | None:
     """Parse price string like '7,000 ₪' or integer to int."""
     if raw_price is None:
@@ -128,6 +133,45 @@ def _parse_listing(item: dict, category: str = "rent") -> ScrapedListing | None:
     # Description from search_text is verbose; use address_more if available
     description = item.get("address_more") or None
 
+    coords = item.get("coordinates") or {}
+    latitude = None
+    longitude = None
+    try:
+        latitude = float(coords.get("latitude")) if coords.get("latitude") is not None else None
+        longitude = float(coords.get("longitude")) if coords.get("longitude") is not None else None
+    except (ValueError, TypeError):
+        pass
+
+    parking = _bool_field(item, "Parking_text")
+    elevator = _bool_field(item, "Elevator_text")
+    safe_room = _bool_field(item, "mamad_text")
+    renovated = _bool_field(item, "Meshupatz_text")
+    balcony_val = item.get("Porch_text")
+    balcony = bool(balcony_val) and str(balcony_val).strip() != "" and str(balcony_val).strip() != "אין"
+    pets_allowed = _bool_field(item, "PetsInHouse_text")
+    furnished = _bool_field(item, "Furniture_text")
+    air_conditioning = _bool_field(item, "AirConditioner_text")
+    accessibility = _bool_field(item, "handicapped_text")
+    is_agent = item.get("merchant") is True
+    agent_office = item.get("merchant_name") or None
+
+    move_in_date = None
+    move_in_raw = item.get("date_of_entry")
+    if move_in_raw and str(move_in_raw).strip():
+        try:
+            move_in_date = str(move_in_raw).strip()[:10]
+        except Exception:
+            pass
+
+    hood_id = None
+    if item.get("hood_id") is not None:
+        try:
+            hood_id = int(item["hood_id"])
+        except (ValueError, TypeError):
+            pass
+
+    customer_id = str(item["customer_id"]) if item.get("customer_id") is not None else None
+
     return ScrapedListing(
         yad2_id=str(yad2_id),
         category=category,
@@ -145,6 +189,23 @@ def _parse_listing(item: dict, category: str = "rent") -> ScrapedListing | None:
         contact_name=item.get("contact_name"),
         contact_phone=None,  # Phone not exposed in feed index, requires separate call
         yad2_date_added=yad2_date_added,
+        source="yad2",
+        latitude=latitude,
+        longitude=longitude,
+        parking=parking,
+        elevator=elevator,
+        safe_room=safe_room,
+        renovated=renovated,
+        balcony=balcony,
+        pets_allowed=pets_allowed,
+        furnished=furnished,
+        air_conditioning=air_conditioning,
+        is_agent=is_agent,
+        agent_office=agent_office,
+        move_in_date=move_in_date,
+        hood_id=hood_id,
+        customer_id=customer_id,
+        accessibility=accessibility,
         image_urls=image_urls,
         listing_url=listing_url,
         raw_data=item,
