@@ -6,6 +6,8 @@ interface FilterBarProps {
   setRooms: (v: string) => void;
   classification: string;
   setClassification: (v: string) => void;
+  source: string;
+  setSource: (v: string) => void;
   sortBy: string;
   setSortBy: (v: string) => void;
   showClassificationFilter: boolean;
@@ -19,6 +21,8 @@ export default function FilterBar({
   setRooms,
   classification,
   setClassification,
+  source,
+  setSource,
   sortBy,
   setSortBy,
   showClassificationFilter,
@@ -53,6 +57,16 @@ export default function FilterBar({
         {roomValues.filter(Boolean).map(r => (
           <option key={r} value={r}>{r} rooms</option>
         ))}
+      </select>
+
+      <select
+        value={source}
+        onChange={e => setSource(e.target.value)}
+        className="flex-1 min-w-[100px] border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+      >
+        <option value="">All sources</option>
+        <option value="yad2">Yad2</option>
+        <option value="madlan">Madlan</option>
       </select>
 
       {showClassificationFilter && (

@@ -11,6 +11,7 @@ function applyFilters(
   neighborhood: string,
   rooms: string,
   classification: string,
+  source: string,
   sortBy: string,
   tab: Tab
 ): Record<string, unknown>[] {
@@ -21,6 +22,9 @@ function applyFilters(
   }
   if (rooms) {
     result = result.filter(i => String(i.rooms ?? '') === rooms);
+  }
+  if (source) {
+    result = result.filter(i => i.source === source);
   }
   if (tab === 'fullscan' && classification) {
     result = result.filter(i => i.classification === classification);
@@ -45,6 +49,7 @@ export default function HomePage() {
   const [neighborhood, setNeighborhood] = useState('');
   const [rooms, setRooms] = useState('');
   const [classification, setClassification] = useState('');
+  const [source, setSource] = useState('');
   const [sortBy, setSortBy] = useState('distress_score');
 
   const { data: oppsData, isLoading: oppsLoading } = useOpportunities();
@@ -58,8 +63,8 @@ export default function HomePage() {
   }, [tab, oppsData, classData]);
 
   const filtered = useMemo(
-    () => applyFilters(rawItems, neighborhood, rooms, classification, sortBy, tab),
-    [rawItems, neighborhood, rooms, classification, sortBy, tab]
+    () => applyFilters(rawItems, neighborhood, rooms, classification, source, sortBy, tab),
+    [rawItems, neighborhood, rooms, classification, source, sortBy, tab]
   );
 
   const isLoading = tab === 'opportunities' ? oppsLoading : classLoading;
@@ -109,6 +114,8 @@ export default function HomePage() {
         setRooms={setRooms}
         classification={classification}
         setClassification={setClassification}
+        source={source}
+        setSource={setSource}
         sortBy={sortBy}
         setSortBy={setSortBy}
         showClassificationFilter={tab === 'fullscan'}

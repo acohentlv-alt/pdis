@@ -83,6 +83,8 @@ export default function SearchResultsPage() {
           setRooms={setRooms}
           classification=""
           setClassification={() => {}}
+          source=""
+          setSource={() => {}}
           sortBy={sortBy}
           setSortBy={setSortBy}
           showClassificationFilter={false}

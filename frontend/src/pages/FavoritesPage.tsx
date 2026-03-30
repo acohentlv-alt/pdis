@@ -7,6 +7,7 @@ function applyFilters(
   items: Record<string, unknown>[],
   neighborhood: string,
   rooms: string,
+  source: string,
   sortBy: string
 ): Record<string, unknown>[] {
   let result = [...items];
@@ -16,6 +17,9 @@ function applyFilters(
   }
   if (rooms) {
     result = result.filter(i => String(i.rooms ?? '') === rooms);
+  }
+  if (source) {
+    result = result.filter(i => i.source === source);
   }
 
   result.sort((a, b) => {
@@ -36,6 +40,7 @@ export default function FavoritesPage() {
   const [neighborhood, setNeighborhood] = useState('');
   const [rooms, setRooms] = useState('');
   const [classification, setClassification] = useState('');
+  const [source, setSource] = useState('');
   const [sortBy, setSortBy] = useState('distress_score');
 
   const { data: favData, isLoading } = useFavorites();
@@ -46,8 +51,8 @@ export default function FavoritesPage() {
   );
 
   const filtered = useMemo(
-    () => applyFilters(rawItems, neighborhood, rooms, sortBy),
-    [rawItems, neighborhood, rooms, sortBy]
+    () => applyFilters(rawItems, neighborhood, rooms, source, sortBy),
+    [rawItems, neighborhood, rooms, source, sortBy]
   );
 
   return (
@@ -62,6 +67,8 @@ export default function FavoritesPage() {
         setRooms={setRooms}
         classification={classification}
         setClassification={setClassification}
+        source={source}
+        setSource={setSource}
         sortBy={sortBy}
         setSortBy={setSortBy}
         showClassificationFilter={false}
