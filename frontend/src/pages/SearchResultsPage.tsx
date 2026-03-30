@@ -6,17 +6,23 @@ import { formatDate } from '../lib/format';
 
 function applyFilters(
   items: Record<string, unknown>[],
-  neighborhood: string,
-  rooms: string,
+  neighborhoods: string[],
+  selectedRooms: string[],
   sortBy: string
 ): Record<string, unknown>[] {
   let result = [...items];
 
-  if (neighborhood) {
-    result = result.filter(i => i.neighborhood === neighborhood);
+  if (neighborhoods.length > 0) {
+    result = result.filter(i => neighborhoods.includes(i.neighborhood as string));
   }
-  if (rooms) {
-    result = result.filter(i => String(i.rooms ?? '') === rooms);
+  if (selectedRooms.length > 0) {
+    result = result.filter(i => {
+      const r = i.rooms as number | null;
+      if (r == null) return false;
+      if (selectedRooms.includes('Studio') && r === 0) return true;
+      if (selectedRooms.includes('6+') && r >= 6) return true;
+      return selectedRooms.includes(String(r));
+    });
   }
 
   result.sort((a, b) => {
@@ -35,8 +41,8 @@ function applyFilters(
 
 export default function SearchResultsPage() {
   const [selectedPresetId, setSelectedPresetId] = useState<number | null>(null);
-  const [neighborhood, setNeighborhood] = useState('');
-  const [rooms, setRooms] = useState('');
+  const [neighborhoods, setNeighborhoods] = useState<string[]>([]);
+  const [selectedRooms, setSelectedRooms] = useState<string[]>([]);
   const [sortBy, setSortBy] = useState('distress_score');
 
   const { data: presetsData, isLoading: presetsLoading } = useOpenSearchPresets();
@@ -47,8 +53,8 @@ export default function SearchResultsPage() {
   }, [propertiesData]);
 
   const filtered = useMemo(
-    () => applyFilters(rawItems, neighborhood, rooms, sortBy),
-    [rawItems, neighborhood, rooms, sortBy]
+    () => applyFilters(rawItems, neighborhoods, selectedRooms, sortBy),
+    [rawItems, neighborhoods, selectedRooms, sortBy]
   );
 
   // Results view — a preset is selected
@@ -59,8 +65,8 @@ export default function SearchResultsPage() {
         <button
           onClick={() => {
             setSelectedPresetId(null);
-            setNeighborhood('');
-            setRooms('');
+            setNeighborhoods([]);
+            setSelectedRooms([]);
             setSortBy('distress_score');
           }}
           className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800"
@@ -77,10 +83,10 @@ export default function SearchResultsPage() {
 
         <FilterBar
           items={rawItems}
-          neighborhood={neighborhood}
-          setNeighborhood={setNeighborhood}
-          rooms={rooms}
-          setRooms={setRooms}
+          neighborhoods={neighborhoods}
+          setNeighborhoods={setNeighborhoods}
+          selectedRooms={selectedRooms}
+          setSelectedRooms={setSelectedRooms}
           classification=""
           setClassification={() => {}}
           source=""
