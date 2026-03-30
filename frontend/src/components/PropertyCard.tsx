@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { formatPrice, formatPricePerSqm, CLASSIFICATION_STYLES } from '../lib/format';
+import ImageViewer from './ImageViewer';
 
 interface PropertyCardProps {
   item: Record<string, unknown>;
@@ -38,15 +40,21 @@ export default function PropertyCard({ item }: PropertyCardProps) {
   const hasElevator = !!(item.elevator);
   const hasAC = !!(item.air_conditioning);
 
+  const [showViewer, setShowViewer] = useState(false);
+
   return (
     <div className="bg-white rounded-xl shadow overflow-hidden">
       {imageUrls.length > 0 && (
         <img
           src={imageUrls[0]}
           alt=""
-          className="w-full h-40 object-cover"
+          className="w-full h-40 object-cover cursor-pointer"
           loading="lazy"
+          onClick={() => setShowViewer(true)}
         />
+      )}
+      {showViewer && imageUrls.length > 0 && (
+        <ImageViewer images={imageUrls} onClose={() => setShowViewer(false)} />
       )}
       <div className="p-4 space-y-2">
       <div className="flex items-start justify-between gap-2">

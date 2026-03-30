@@ -1,8 +1,10 @@
+import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useProperty, useSignals, useEvents, useOperatorInput, useMatches } from '../api/queries';
 import { useWhitelist, useRemoveWhitelist, useBlacklist, useRemoveBlacklist } from '../api/mutations';
 import { formatPrice, formatPricePerSqm, formatDate, formatDateFull, CLASSIFICATION_STYLES } from '../lib/format';
 import LifecycleTimeline from '../components/LifecycleTimeline';
+import ImageViewer from '../components/ImageViewer';
 import OperatorInputForm from '../components/OperatorInputForm';
 import NotesList from '../components/NotesList';
 
@@ -96,6 +98,8 @@ export default function PropertyDetailPage() {
   const isBlacklisted = !!(prop.is_blacklisted);
 
   const imageUrls = (prop.image_urls as string[] | null) ?? [];
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerStartIndex, setViewerStartIndex] = useState(0);
   const yad2DateAdded = prop.yad2_date_added as string | null;
 
   const isAgent = !!(prop.is_agent);
@@ -130,8 +134,9 @@ export default function PropertyDetailPage() {
           <img
             src={imageUrls[0]}
             alt=""
-            className="w-full h-56 object-cover"
+            className="w-full h-56 object-cover cursor-pointer"
             loading="lazy"
+            onClick={() => { setViewerStartIndex(0); setViewerOpen(true); }}
           />
           {imageUrls.length > 1 && (
             <div className="flex gap-2 overflow-x-auto bg-gray-100 p-2">
@@ -140,13 +145,21 @@ export default function PropertyDetailPage() {
                   key={i}
                   src={url}
                   alt=""
-                  className="h-16 w-24 object-cover rounded shrink-0"
+                  className="h-16 w-24 object-cover rounded shrink-0 cursor-pointer"
                   loading="lazy"
+                  onClick={() => { setViewerStartIndex(i + 1); setViewerOpen(true); }}
                 />
               ))}
             </div>
           )}
         </div>
+      )}
+      {viewerOpen && imageUrls.length > 0 && (
+        <ImageViewer
+          images={imageUrls}
+          startIndex={viewerStartIndex}
+          onClose={() => setViewerOpen(false)}
+        />
       )}
 
       {/* Header */}
