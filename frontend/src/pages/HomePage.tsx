@@ -66,7 +66,13 @@ export default function HomePage() {
 
   return (
     <div className="max-w-lg mx-auto px-4 py-4 space-y-4">
-      <h1 className="text-xl font-bold text-gray-900">PDIS Intelligence</h1>
+      <h1 className="text-xl font-bold text-gray-900">
+        {new Date().getHours() < 12
+          ? '☀️ Good morning, Shoubidu Properties'
+          : new Date().getHours() < 18
+          ? '👋 Good afternoon, Shoubidu Properties'
+          : '🌙 Good evening, Shoubidu Properties'}
+      </h1>
 
       <SummaryBar />
 
