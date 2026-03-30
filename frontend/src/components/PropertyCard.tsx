@@ -47,9 +47,12 @@ export default function PropertyCard({ item }: PropertyCardProps) {
       )}
       <div className="p-4 space-y-2">
       <div className="flex items-start justify-between gap-2">
-        <span dir="rtl" className="font-semibold text-gray-800 text-sm leading-snug">
-          {neighborhood || 'Unknown area'}
-        </span>
+        <div dir="rtl" className="text-sm leading-snug">
+          <span className="font-semibold text-gray-800">{neighborhood || 'Unknown area'}</span>
+          {item.address_street && (
+            <span className="text-gray-500 mr-1">, {item.address_street as string}</span>
+          )}
+        </div>
         <span className={`${style.bg} text-white text-xs px-2 py-0.5 rounded-full font-medium shrink-0`}>
           {style.icon} {style.label}
         </span>
