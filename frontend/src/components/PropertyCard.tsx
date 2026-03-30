@@ -50,7 +50,7 @@ export default function PropertyCard({ item }: PropertyCardProps) {
         <div dir="rtl" className="text-sm leading-snug">
           <span className="font-semibold text-gray-800">{neighborhood || 'Unknown area'}</span>
           {item.address_street && (
-            <span className="text-gray-500 mr-1">, {item.address_street as string}</span>
+            <span className="text-gray-500 mr-1">, {String(item.address_street)}</span>
           )}
         </div>
         <span className={`${style.bg} text-white text-xs px-2 py-0.5 rounded-full font-medium shrink-0`}>
