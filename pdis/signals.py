@@ -62,6 +62,14 @@ WEAK_LANGUAGE_KEYWORDS = [
     "חייבים", "בהזדמנות", "מחיר שפוי",
 ]
 
+# Condition keywords — property needs renovation or is old/untouched
+CONDITION_KEYWORDS = [
+    "דירת סבתא",
+    "דרוש שיפוץ",
+    "דרוש ריענון",
+    "ריענון",
+]
+
 
 def _compute_single(pid: int, events: list[dict], prop: dict) -> dict:
     """Compute distress score for a single property. Pure function, no DB calls."""
@@ -74,6 +82,7 @@ def _compute_single(pid: int, events: list[dict], prop: dict) -> dict:
         "desc_changes": 0,
         "img_changes": 0,
         "weak_language_found": [],
+        "condition_keywords_found": [],
     }
 
     # Count events by type
@@ -122,6 +131,12 @@ def _compute_single(pid: int, events: list[dict], prop: dict) -> dict:
     for keyword in WEAK_LANGUAGE_KEYWORDS:
         if keyword in desc:
             details["weak_language_found"].append(keyword)
+            score += 5
+
+    # Condition keywords (renovation/old property signals)
+    for keyword in CONDITION_KEYWORDS:
+        if keyword in desc:
+            details["condition_keywords_found"].append(keyword)
             score += 5
 
     # Cap at 100

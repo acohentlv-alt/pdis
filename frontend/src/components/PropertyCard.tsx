@@ -32,6 +32,7 @@ export default function PropertyCard({ item, favoriteIds, onToggleFavorite }: Pr
   const hasRelisting = !!(sd.has_relisting);
   const longListed = dom > 60;
   const weakLanguage = Array.isArray(sd.weak_language_found) && (sd.weak_language_found as unknown[]).length > 0;
+  const conditionAlert = Array.isArray(sd.condition_keywords_found) && (sd.condition_keywords_found as unknown[]).length > 0;
 
   const imageUrls = (item.image_urls as string[] | null) ?? [];
   const isAgent = !!(item.is_agent);
@@ -120,6 +121,9 @@ export default function PropertyCard({ item, favoriteIds, onToggleFavorite }: Pr
         )}
         {weakLanguage && (
           <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">💬 Weak language</span>
+        )}
+        {conditionAlert && (
+          <span className="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full">🔧 Condition</span>
         )}
       </div>
 

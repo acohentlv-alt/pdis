@@ -33,6 +33,18 @@ function SignalRow({ label, active, extra }: SignalRowProps) {
   );
 }
 
+function highlightKeywords(text: string, keywords: string[]): React.ReactNode {
+  if (!keywords.length) return text;
+  const escaped = keywords.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const regex = new RegExp(`(${escaped.join('|')})`, 'g');
+  const parts = text.split(regex);
+  return parts.map((part, i) =>
+    keywords.includes(part)
+      ? <mark key={i} className="bg-yellow-200 px-0.5 rounded">{part}</mark>
+      : <span key={i}>{part}</span>
+  );
+}
+
 export default function PropertyDetailPage() {
   const { yad2Id } = useParams<{ yad2Id: string }>();
   const navigate = useNavigate();
@@ -75,11 +87,13 @@ export default function PropertyDetailPage() {
   const descChanges = (sd.desc_changes as number) ?? 0;
   const imgChanges = (sd.img_changes as number) ?? 0;
   const weakLanguage = Array.isArray(sd.weak_language_found) ? sd.weak_language_found as unknown[] : [];
+  const conditionKeywords = Array.isArray(sd.condition_keywords_found) ? sd.condition_keywords_found as string[] : [];
 
   // Summary line
   const summaryParts: string[] = [];
   if (hasRelisting) summaryParts.push('Returned after removal');
   if (priceDrops > 0) summaryParts.push('Price drop');
+  if (conditionKeywords.length > 0) summaryParts.push('Condition note');
   if (dom > 60) summaryParts.push('Long on market');
   if (weakLanguage.length > 0) summaryParts.push('Weak language');
 
@@ -236,6 +250,7 @@ export default function PropertyDetailPage() {
         <SignalRow label="Text Changes" active={descChanges > 0} extra={descChanges > 0 ? `${descChanges}x` : undefined} />
         <SignalRow label="Image Changes" active={imgChanges > 0} extra={imgChanges > 0 ? `${imgChanges}x` : undefined} />
         <SignalRow label="Weak Language" active={weakLanguage.length > 0} />
+        <SignalRow label="Condition" active={conditionKeywords.length > 0} />
         <SignalRow label="Relist Delay" active={hasRelisting} />
         <SignalRow label="Overexposure" active={dom > 90} />
       </Section>
@@ -282,7 +297,9 @@ export default function PropertyDetailPage() {
       {!!(prop.description) && (
         <Section title="Listing Description">
           <p dir="rtl" className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
-            {String(prop.description)}
+            {conditionKeywords.length > 0
+              ? highlightKeywords(String(prop.description), conditionKeywords)
+              : String(prop.description)}
           </p>
         </Section>
       )}
