@@ -13,7 +13,7 @@ logger = structlog.get_logger(__name__)
 
 MADLAN_API_URL = "https://www.madlan.co.il/api3"
 MADLAN_HOME_URL = "https://www.madlan.co.il"
-MADLAN_IMAGE_BASE = "https://images.madlan.co.il/t:nonce:2025"
+MADLAN_IMAGE_BASE = "https://images2.madlan.co.il"
 PAGE_SIZE = 200
 
 GRAPHQL_QUERY = """
