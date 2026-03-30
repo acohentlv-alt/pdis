@@ -714,7 +714,15 @@ async def list_classifications(
                 SELECT pc.*, p.yad2_id, p.address_street, p.address_city,
                        p.address_home_number, p.price, p.rooms, p.neighborhood, p.days_on_market,
                        p.square_meters, p.image_urls, p.listing_url,
-                       p.is_agent, p.parking, p.elevator, p.air_conditioning
+                       p.is_agent, p.parking, p.elevator, p.air_conditioning,
+                       p.source,
+                       (SELECT ARRAY_AGG(DISTINCT p2.source)
+                        FROM property_matches pm
+                        JOIN properties p2 ON p2.id = CASE
+                            WHEN pm.property_id_a = p.id THEN pm.property_id_b
+                            ELSE pm.property_id_a END
+                        WHERE pm.property_id_a = p.id OR pm.property_id_b = p.id
+                       ) AS matched_sources
                 FROM property_classifications pc
                 JOIN properties p ON p.id = pc.property_id
                 {where}
@@ -757,7 +765,14 @@ async def list_opportunities(
 
             await cur.execute(
                 """
-                SELECT pc.*, p.*
+                SELECT pc.*, p.*,
+                       (SELECT ARRAY_AGG(DISTINCT p2.source)
+                        FROM property_matches pm
+                        JOIN properties p2 ON p2.id = CASE
+                            WHEN pm.property_id_a = p.id THEN pm.property_id_b
+                            ELSE pm.property_id_a END
+                        WHERE pm.property_id_a = p.id OR pm.property_id_b = p.id
+                       ) AS matched_sources
                 FROM property_classifications pc
                 JOIN properties p ON p.id = pc.property_id
                 LEFT JOIN blacklist bl ON bl.property_id = pc.property_id

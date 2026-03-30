@@ -204,11 +204,11 @@ export default function PropertyDetailPage() {
       </Section>
 
       {/* Summary */}
-      {summaryParts.length > 0 && (
+      {summaryParts.length > 0 ? (
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
           {summaryParts.join(' + ')}
         </div>
-      )}
+      ) : null}
 
       {/* Signals */}
       <Section title="Signals">
@@ -263,7 +263,7 @@ export default function PropertyDetailPage() {
       </Section>
 
       {/* Listing Description */}
-      {prop.description && (
+      {!!(prop.description) && (
         <Section title="Listing Description">
           <p dir="rtl" className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
             {String(prop.description)}
@@ -274,7 +274,7 @@ export default function PropertyDetailPage() {
       {/* Contact Info */}
       <Section title="Contact">
         <div className="text-sm space-y-1">
-          {prop.contact_name && (
+          {!!(prop.contact_name) && (
             <div className="text-gray-800">
               <span className="text-gray-500">Name: </span>
               <span dir="rtl" className="font-medium">{String(prop.contact_name)}</span>

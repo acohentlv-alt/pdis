@@ -259,6 +259,153 @@ async def find_matches(session_id: int) -> int:
     return inserted
 
 
+async def run_full_cross_source_match() -> int:
+    """One-time full comparison of all properties across sources."""
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT id, source, latitude, longitude, rooms, floor,
+                       square_meters, price, neighborhood, description
+                FROM properties
+                WHERE is_active = TRUE AND source = 'yad2'
+                """
+            )
+            yad2_props = [dict(r) for r in await cur.fetchall()]
+
+            await cur.execute(
+                """
+                SELECT id, source, latitude, longitude, rooms, floor,
+                       square_meters, price, neighborhood, description
+                FROM properties
+                WHERE is_active = TRUE AND source = 'madlan'
+                """
+            )
+            madlan_props = [dict(r) for r in await cur.fetchall()]
+
+    if not yad2_props or not madlan_props:
+        logger.info("cross_source_match.skip", yad2=len(yad2_props), madlan=len(madlan_props))
+        return 0
+
+    matches_to_insert: list[tuple] = []
+
+    for yp in yad2_props:
+        for mp in madlan_props:
+            id_a = min(yp["id"], mp["id"])
+            id_b = max(yp["id"], mp["id"])
+
+            lat_a = yp.get("latitude")
+            lon_a = yp.get("longitude")
+            lat_b = mp.get("latitude")
+            lon_b = mp.get("longitude")
+            rooms_a = yp.get("rooms")
+            rooms_b = mp.get("rooms")
+            floor_a = yp.get("floor")
+            floor_b = mp.get("floor")
+
+            # --- Tier 1: coordinates within 100m + same rooms + same floor ---
+            if (
+                lat_a is not None
+                and lon_a is not None
+                and lat_b is not None
+                and lon_b is not None
+                and rooms_a is not None
+                and rooms_b is not None
+                and floor_a is not None
+                and floor_b is not None
+                and rooms_a == rooms_b
+                and floor_a == floor_b
+                and _haversine_meters(lat_a, lon_a, lat_b, lon_b) < 100
+            ):
+                matches_to_insert.append(
+                    (id_a, id_b, 1, "cross_source_coordinates_rooms_floor", 0.95, True)
+                )
+                continue
+
+            neigh_a = yp.get("neighborhood")
+            neigh_b = mp.get("neighborhood")
+            sqm_a = yp.get("square_meters")
+            sqm_b = mp.get("square_meters")
+            price_a = yp.get("price")
+            price_b = mp.get("price")
+
+            # --- Tier 2: neighborhood + rooms + floor + sq_meters (±5) + price within 20% ---
+            if (
+                neigh_a is not None
+                and neigh_b is not None
+                and rooms_a is not None
+                and rooms_b is not None
+                and floor_a is not None
+                and floor_b is not None
+                and sqm_a is not None
+                and sqm_b is not None
+                and price_a is not None
+                and price_b is not None
+                and neigh_a == neigh_b
+                and rooms_a == rooms_b
+                and floor_a == floor_b
+                and abs(sqm_a - sqm_b) <= 5
+                and _price_within_pct(price_a, price_b, 0.20)
+            ):
+                matches_to_insert.append(
+                    (id_a, id_b, 2, "cross_source_neighborhood_rooms_floor_size_price", 0.75, True)
+                )
+                continue
+
+            # --- Tier 3: neighborhood + price within 20% + text similarity > 60% ---
+            desc_a = yp.get("description")
+            desc_b = mp.get("description")
+
+            if (
+                neigh_a is not None
+                and neigh_b is not None
+                and price_a is not None
+                and price_b is not None
+                and desc_a is not None
+                and desc_b is not None
+                and len(desc_a) >= 10
+                and len(desc_b) >= 10
+                and neigh_a == neigh_b
+                and _price_within_pct(price_a, price_b, 0.20)
+            ):
+                overlap = _word_overlap(desc_a, desc_b)
+                if overlap > 0.60:
+                    matches_to_insert.append(
+                        (id_a, id_b, 3, "cross_source_neighborhood_price_text_similarity", overlap, None)
+                    )
+
+    if not matches_to_insert:
+        logger.info("cross_source_match.done", new_matches=0)
+        return 0
+
+    # Deduplicate by (id_a, id_b) — keep highest tier (lowest tier number) per pair
+    seen: dict[tuple[int, int], tuple] = {}
+    for m in matches_to_insert:
+        key = (m[0], m[1])
+        if key not in seen or m[2] < seen[key][2]:
+            seen[key] = m
+
+    deduped = list(seen.values())
+
+    inserted = 0
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.executemany(
+                """
+                INSERT INTO property_matches
+                    (property_id_a, property_id_b, match_tier, match_reason, confidence, is_confirmed)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (property_id_a, property_id_b) DO NOTHING
+                """,
+                deduped,
+            )
+            inserted = cur.rowcount if cur.rowcount > 0 else 0
+        await conn.commit()
+
+    logger.info("cross_source_match.done", new_matches=inserted)
+    return inserted
+
+
 async def detect_customer_relistings(session_id: int) -> int:
     """
     Find properties in this session that share a customer_id with

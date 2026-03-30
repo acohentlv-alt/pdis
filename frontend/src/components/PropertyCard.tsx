@@ -18,6 +18,9 @@ export default function PropertyCard({ item }: PropertyCardProps) {
   const classification = (item.classification as string) ?? 'cold';
   const style = CLASSIFICATION_STYLES[classification] ?? CLASSIFICATION_STYLES.cold;
   const sd = getSignalDetails(item);
+  const source = (item.source as string) ?? 'yad2';
+  const matchedSources = (item.matched_sources as string[] | null) ?? [];
+  const allSources = new Set([source, ...matchedSources]);
 
   const price = item.price as number | null;
   const sqm = item.square_meters as number | null;
@@ -55,9 +58,17 @@ export default function PropertyCard({ item }: PropertyCardProps) {
             </span>
           )}
         </div>
-        <span className={`${style.bg} text-white text-xs px-2 py-0.5 rounded-full font-medium shrink-0`}>
-          {style.icon} {style.label}
-        </span>
+        <div className="flex items-center gap-1 shrink-0">
+          {allSources.has('yad2') && (
+            <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">Y2</span>
+          )}
+          {allSources.has('madlan') && (
+            <span className="text-xs bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded">MD</span>
+          )}
+          <span className={`${style.bg} text-white text-xs px-2 py-0.5 rounded-full font-medium`}>
+            {style.icon} {style.label}
+          </span>
+        </div>
       </div>
 
       <div className="text-sm text-gray-700">
