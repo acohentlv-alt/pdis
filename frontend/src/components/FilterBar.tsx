@@ -11,6 +11,8 @@ interface FilterBarProps {
   sortBy: string;
   setSortBy: (v: string) => void;
   showClassificationFilter: boolean;
+  keyword: string;
+  setKeyword: (v: string) => void;
 }
 
 const ROOM_OPTIONS = ['Studio', '1', '1.5', '2', '2.5', '3', '3.5', '4', '4.5', '5', '6+'];
@@ -32,6 +34,8 @@ export default function FilterBar({
   sortBy,
   setSortBy,
   showClassificationFilter,
+  keyword,
+  setKeyword,
 }: FilterBarProps) {
   const uniqueNeighborhoods = Array.from(new Set(
     items.map(i => i.neighborhood as string).filter(Boolean)
@@ -39,6 +43,22 @@ export default function FilterBar({
 
   return (
     <div className="space-y-2 py-2">
+      <div className="relative">
+        <input
+          type="text"
+          value={keyword}
+          onChange={e => setKeyword(e.target.value)}
+          placeholder="Search keywords..."
+          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white pr-8"
+        />
+        {keyword && (
+          <button
+            onClick={() => setKeyword('')}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm"
+          >&#x2715;</button>
+        )}
+      </div>
+
       <div>
         <div className="text-xs text-gray-500 mb-1">Neighborhood</div>
         <div className="flex gap-1.5 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
@@ -110,7 +130,7 @@ export default function FilterBar({
           onChange={e => setSortBy(e.target.value)}
           className="flex-1 min-w-[130px] border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
         >
-          <option value="distress_score">Most signals</option>
+          <option value="signals">Most signals</option>
           <option value="price">Price</option>
           <option value="days_on_market">Days on market</option>
         </select>

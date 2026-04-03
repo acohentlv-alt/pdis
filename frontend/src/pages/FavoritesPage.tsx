@@ -1,15 +1,16 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import FilterBar from '../components/FilterBar';
 import PropertyCard from '../components/PropertyCard';
-import { useFavorites, useFavoriteIds } from '../api/queries';
-import { useAddFavorite, useRemoveFavorite } from '../api/mutations';
+import { useFavorites, useFavoriteIds, useWhitelistIds, useBlacklistIds } from '../api/queries';
+import { useAddFavorite, useRemoveFavorite, useWhitelist, useRemoveWhitelist, useBlacklist, useRemoveBlacklist } from '../api/mutations';
 
 function applyFilters(
   items: Record<string, unknown>[],
   neighborhoods: string[],
   selectedRooms: string[],
   source: string,
-  sortBy: string
+  sortBy: string,
+  keyword: string
 ): Record<string, unknown>[] {
   let result = [...items];
 
@@ -27,6 +28,16 @@ function applyFilters(
   }
   if (source) {
     result = result.filter(i => i.source === source);
+  }
+  if (keyword.trim()) {
+    const kw = keyword.toLowerCase();
+    result = result.filter(i => {
+      const text = [
+        i.description, i.address_street, i.neighborhood,
+        i.contact_name, i.agent_office
+      ].filter(Boolean).join(' ').toLowerCase();
+      return text.includes(kw);
+    });
   }
 
   result.sort((a, b) => {
@@ -49,15 +60,38 @@ export default function FavoritesPage() {
   const [classification, setClassification] = useState('');
   const [source, setSource] = useState('');
   const [sortBy, setSortBy] = useState('distress_score');
+  const [keyword, setKeyword] = useState('');
+  const [debouncedKeyword, setDebouncedKeyword] = useState('');
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedKeyword(keyword), 300);
+    return () => clearTimeout(timer);
+  }, [keyword]);
 
   const { data: favData, isLoading } = useFavorites();
   const { data: favIdsData } = useFavoriteIds();
+  const { data: whitelistData } = useWhitelistIds();
+  const { data: blacklistData } = useBlacklistIds();
   const favIds = useMemo(() => new Set(favIdsData?.ids ?? []), [favIdsData]);
+  const whitelistIds = useMemo(() => new Set(whitelistData?.ids ?? []), [whitelistData]);
+  const blacklistIds = useMemo(() => new Set(blacklistData?.ids ?? []), [blacklistData]);
   const addFav = useAddFavorite();
   const removeFav = useRemoveFavorite();
+  const addWhitelist = useWhitelist();
+  const removeWhitelist = useRemoveWhitelist();
+  const addBlacklist = useBlacklist();
+  const removeBlacklist = useRemoveBlacklist();
   const handleToggleFav = (yad2Id: string, isFav: boolean) => {
     if (isFav) removeFav.mutate(yad2Id);
     else addFav.mutate(yad2Id);
+  };
+  const handleToggleWhitelist = (yad2Id: string) => {
+    if (whitelistIds.has(yad2Id)) removeWhitelist.mutate(yad2Id);
+    else addWhitelist.mutate(yad2Id);
+  };
+  const handleToggleBlacklist = (yad2Id: string) => {
+    if (blacklistIds.has(yad2Id)) removeBlacklist.mutate(yad2Id);
+    else addBlacklist.mutate(yad2Id);
   };
 
   const rawItems = useMemo(
@@ -66,8 +100,8 @@ export default function FavoritesPage() {
   );
 
   const filtered = useMemo(
-    () => applyFilters(rawItems, neighborhoods, selectedRooms, source, sortBy),
-    [rawItems, neighborhoods, selectedRooms, source, sortBy]
+    () => applyFilters(rawItems, neighborhoods, selectedRooms, source, sortBy, debouncedKeyword),
+    [rawItems, neighborhoods, selectedRooms, source, sortBy, debouncedKeyword]
   );
 
   return (
@@ -87,6 +121,8 @@ export default function FavoritesPage() {
         sortBy={sortBy}
         setSortBy={setSortBy}
         showClassificationFilter={false}
+        keyword={keyword}
+        setKeyword={setKeyword}
       />
 
       {isLoading && (
@@ -105,7 +141,16 @@ export default function FavoritesPage() {
 
       <div className="space-y-3 pb-8">
         {filtered.map(item => (
-          <PropertyCard key={item.yad2_id as string} item={item} favoriteIds={favIds} onToggleFavorite={handleToggleFav} />
+          <PropertyCard
+            key={item.yad2_id as string}
+            item={item}
+            favoriteIds={favIds}
+            onToggleFavorite={handleToggleFav}
+            isWhitelisted={whitelistIds.has(item.yad2_id as string)}
+            isBlacklisted={blacklistIds.has(item.yad2_id as string)}
+            onToggleWhitelist={() => handleToggleWhitelist(item.yad2_id as string)}
+            onToggleBlacklist={() => handleToggleBlacklist(item.yad2_id as string)}
+          />
         ))}
       </div>
     </div>

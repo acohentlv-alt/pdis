@@ -26,52 +26,56 @@ export function useDeleteNote() {
   });
 }
 
-export function useWhitelist(yad2Id: string) {
+export function useWhitelist() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () =>
+    mutationFn: (yad2Id: string) =>
       apiFetch(`/api/whitelist/${yad2Id}`, { method: 'POST', body: JSON.stringify({}) }),
-    onSuccess: () => {
+    onSuccess: (_data, yad2Id) => {
       qc.invalidateQueries({ queryKey: ['property', yad2Id] });
       qc.invalidateQueries({ queryKey: ['opportunities'] });
       qc.invalidateQueries({ queryKey: ['classifications'] });
+      qc.invalidateQueries({ queryKey: ['whitelistIds'] });
     },
   });
 }
 
-export function useRemoveWhitelist(yad2Id: string) {
+export function useRemoveWhitelist() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => apiFetch(`/api/whitelist/${yad2Id}`, { method: 'DELETE' }),
-    onSuccess: () => {
+    mutationFn: (yad2Id: string) => apiFetch(`/api/whitelist/${yad2Id}`, { method: 'DELETE' }),
+    onSuccess: (_data, yad2Id) => {
       qc.invalidateQueries({ queryKey: ['property', yad2Id] });
       qc.invalidateQueries({ queryKey: ['opportunities'] });
       qc.invalidateQueries({ queryKey: ['classifications'] });
+      qc.invalidateQueries({ queryKey: ['whitelistIds'] });
     },
   });
 }
 
-export function useBlacklist(yad2Id: string) {
+export function useBlacklist() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () =>
+    mutationFn: (yad2Id: string) =>
       apiFetch(`/api/blacklist/${yad2Id}`, { method: 'POST', body: JSON.stringify({}) }),
-    onSuccess: () => {
+    onSuccess: (_data, yad2Id) => {
       qc.invalidateQueries({ queryKey: ['property', yad2Id] });
       qc.invalidateQueries({ queryKey: ['opportunities'] });
       qc.invalidateQueries({ queryKey: ['classifications'] });
+      qc.invalidateQueries({ queryKey: ['blacklistIds'] });
     },
   });
 }
 
-export function useRemoveBlacklist(yad2Id: string) {
+export function useRemoveBlacklist() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => apiFetch(`/api/blacklist/${yad2Id}`, { method: 'DELETE' }),
-    onSuccess: () => {
+    mutationFn: (yad2Id: string) => apiFetch(`/api/blacklist/${yad2Id}`, { method: 'DELETE' }),
+    onSuccess: (_data, yad2Id) => {
       qc.invalidateQueries({ queryKey: ['property', yad2Id] });
       qc.invalidateQueries({ queryKey: ['opportunities'] });
       qc.invalidateQueries({ queryKey: ['classifications'] });
+      qc.invalidateQueries({ queryKey: ['blacklistIds'] });
     },
   });
 }
@@ -119,6 +123,48 @@ export function useRemoveFavorite() {
       queryClient.invalidateQueries({ queryKey: ['favoriteIds'] });
       queryClient.invalidateQueries({ queryKey: ['favorites'] });
     },
+  });
+}
+
+export function useCreatePreset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) =>
+      apiFetch('/api/presets', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['presets'] }),
+  });
+}
+
+export function useUpdatePreset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: Record<string, unknown>) =>
+      apiFetch(`/api/presets/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['presets'] }),
+  });
+}
+
+export function useDeletePreset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) =>
+      apiFetch(`/api/presets/${id}`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['presets'] }),
+  });
+}
+
+export function useTogglePreset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) =>
+      apiFetch(`/api/presets/${id}/toggle`, { method: 'PATCH' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['presets'] }),
   });
 }
 

@@ -8,6 +8,21 @@ import ImageViewer from '../components/ImageViewer';
 import OperatorInputForm from '../components/OperatorInputForm';
 import NotesList from '../components/NotesList';
 
+const SIGNAL_LABELS: Record<string, string> = {
+  price_drop_gt_10pct: "Large price drop (>10%)",
+  relisted_2plus: "Relisted 2+ times",
+  listed_90plus_days: "Listed 90+ days",
+  weak_language: "Desperate language detected",
+  condition_keywords: "Needs renovation",
+  below_avg_price: "Below neighborhood average price/sqm",
+  price_drop_small: "Price drop (≤10%)",
+  relisted_once: "Relisted once",
+  listed_30_60_days: "Listed 30-60 days",
+  desc_changes: "Description changed",
+  img_changes: "Images changed",
+  move_in_urgent: "Urgent move-in date",
+};
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="bg-white rounded-xl shadow p-4 space-y-3">
@@ -55,10 +70,10 @@ export default function PropertyDetailPage() {
   useOperatorInput(yad2Id);
   const { data: matchesData } = useMatches(yad2Id);
 
-  const whitelist = useWhitelist(yad2Id!);
-  const removeWhitelist = useRemoveWhitelist(yad2Id!);
-  const blacklist = useBlacklist(yad2Id!);
-  const removeBlacklist = useRemoveBlacklist(yad2Id!);
+  const whitelist = useWhitelist();
+  const removeWhitelist = useRemoveWhitelist();
+  const blacklist = useBlacklist();
+  const removeBlacklist = useRemoveBlacklist();
   const addFav = useAddFavorite();
   const removeFav = useRemoveFavorite();
   const [viewerOpen, setViewerOpen] = useState(false);
@@ -81,9 +96,16 @@ export default function PropertyDetailPage() {
   const sqm = prop.square_meters as number | null;
   const dom = (prop.days_on_market as number) ?? 0;
 
-  // Signal details
+  // Signal details — support both new tier-based and old shapes
+  const strongSignals = (sd.strong_signals as string[]) ?? [];
+  const weakSignals = (sd.weak_signals as string[]) ?? [];
+  const hasTierSignals = strongSignals.length > 0 || weakSignals.length > 0;
+
+  // Old shape fields (still used for summary + description highlighting)
   const priceDrops = (sd.price_drops as number) ?? 0;
-  const hasRelisting = !!(sd.has_relisting);
+  const hasRelisting = hasTierSignals
+    ? (sd.relisting_count as number ?? 0) > 0
+    : !!(sd.has_relisting);
   const descChanges = (sd.desc_changes as number) ?? 0;
   const imgChanges = (sd.img_changes as number) ?? 0;
   const weakLanguage = Array.isArray(sd.weak_language_found) ? sd.weak_language_found as unknown[] : [];
@@ -139,7 +161,7 @@ export default function PropertyDetailPage() {
   return (
     <div className="max-w-lg mx-auto px-4 py-4 space-y-4">
       <button
-        onClick={() => navigate('/')}
+        onClick={() => navigate(-1)}
         className="flex items-center gap-1 text-sm text-gray-500 min-h-[44px]"
       >
         ← Back
@@ -218,7 +240,7 @@ export default function PropertyDetailPage() {
         </div>
         {isAgent && agentOffice && (
           <div className="text-sm text-gray-600 border-t pt-2 mt-2">
-            Listed by: <span className="font-medium">{agentOffice}</span>
+            Listed by: <span dir="rtl" className="font-medium">{agentOffice}</span>
           </div>
         )}
         {moveInDate && (
@@ -242,17 +264,47 @@ export default function PropertyDetailPage() {
 
       {/* Signals */}
       <Section title="Signals">
-        <SignalRow label="Price Drop" active={priceDrops > 0} extra={priceDrops > 0 ? `${priceDrops}x` : undefined} />
-        <SignalRow label="Reappeared" active={hasRelisting} />
-        <SignalRow label="Days on Market" active={dom > 0} extra={`${dom} days`} />
-        <SignalRow label="Price Stagnation" active={dom > 60 && priceDrops === 0} />
-        <SignalRow label="Multiple Attempts" active={hasRelisting} extra={hasRelisting ? `${attempts} attempts` : undefined} />
-        <SignalRow label="Text Changes" active={descChanges > 0} extra={descChanges > 0 ? `${descChanges}x` : undefined} />
-        <SignalRow label="Image Changes" active={imgChanges > 0} extra={imgChanges > 0 ? `${imgChanges}x` : undefined} />
-        <SignalRow label="Weak Language" active={weakLanguage.length > 0} />
-        <SignalRow label="Condition" active={conditionKeywords.length > 0} />
-        <SignalRow label="Relist Delay" active={hasRelisting} />
-        <SignalRow label="Overexposure" active={dom > 90} />
+        {hasTierSignals ? (
+          <div className="space-y-3">
+            {strongSignals.length > 0 && (
+              <div>
+                <div className="text-xs font-medium text-red-600 mb-1">Strong Signals</div>
+                {strongSignals.map(s => (
+                  <div key={s} className="text-sm text-gray-700 flex items-center gap-1">
+                    <span className="text-red-500">●</span> {SIGNAL_LABELS[s] ?? s}
+                  </div>
+                ))}
+              </div>
+            )}
+            {weakSignals.length > 0 && (
+              <div>
+                <div className="text-xs font-medium text-yellow-600 mb-1">Weak Signals</div>
+                {weakSignals.map(s => (
+                  <div key={s} className="text-sm text-gray-700 flex items-center gap-1">
+                    <span className="text-yellow-500">●</span> {SIGNAL_LABELS[s] ?? s}
+                  </div>
+                ))}
+              </div>
+            )}
+            {strongSignals.length === 0 && weakSignals.length === 0 && (
+              <div className="text-sm text-gray-400">No signals detected</div>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-1">
+            <SignalRow label="Price Drop" active={priceDrops > 0} extra={priceDrops > 0 ? `${priceDrops}x` : undefined} />
+            <SignalRow label="Reappeared" active={hasRelisting} />
+            <SignalRow label="Days on Market" active={dom > 0} extra={`${dom} days`} />
+            <SignalRow label="Price Stagnation" active={dom > 60 && priceDrops === 0} />
+            <SignalRow label="Multiple Attempts" active={hasRelisting} extra={hasRelisting ? `${attempts} attempts` : undefined} />
+            <SignalRow label="Text Changes" active={descChanges > 0} extra={descChanges > 0 ? `${descChanges}x` : undefined} />
+            <SignalRow label="Image Changes" active={imgChanges > 0} extra={imgChanges > 0 ? `${imgChanges}x` : undefined} />
+            <SignalRow label="Weak Language" active={weakLanguage.length > 0} />
+            <SignalRow label="Condition" active={conditionKeywords.length > 0} />
+            <SignalRow label="Relist Delay" active={hasRelisting} />
+            <SignalRow label="Overexposure" active={dom > 90} />
+          </div>
+        )}
       </Section>
 
       {/* Property Evolution */}
@@ -358,7 +410,7 @@ export default function PropertyDetailPage() {
 
               return (
                 <div key={m.id as number} className="flex items-center justify-between gap-2 text-sm">
-                  <div className="text-gray-700 truncate">
+                  <div dir="rtl" className="text-gray-700 truncate">
                     {matched
                       ? (matched.address_street as string) || (matched.yad2_id as string)
                       : '—'}
@@ -386,7 +438,7 @@ export default function PropertyDetailPage() {
             {isFavorited ? '⭐ Saved' : '☆ Save'}
           </button>
           <button
-            onClick={() => isWhitelisted ? removeWhitelist.mutate() : whitelist.mutate()}
+            onClick={() => isWhitelisted ? removeWhitelist.mutate(yad2Id!) : whitelist.mutate(yad2Id!)}
             disabled={whitelist.isPending || removeWhitelist.isPending}
             className={`flex-1 min-h-[44px] rounded-lg text-sm font-medium border transition-colors disabled:opacity-50 ${
               isWhitelisted
@@ -397,7 +449,7 @@ export default function PropertyDetailPage() {
             {isWhitelisted ? '✓ Whitelisted' : 'Whitelist'}
           </button>
           <button
-            onClick={() => isBlacklisted ? removeBlacklist.mutate() : blacklist.mutate()}
+            onClick={() => isBlacklisted ? removeBlacklist.mutate(yad2Id!) : blacklist.mutate(yad2Id!)}
             disabled={blacklist.isPending || removeBlacklist.isPending}
             className={`flex-1 min-h-[44px] rounded-lg text-sm font-medium border transition-colors disabled:opacity-50 ${
               isBlacklisted

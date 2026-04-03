@@ -1,10 +1,10 @@
 import { useLocation, useNavigate } from 'react-router-dom';
 
 const tabs = [
-  { path: '/', icon: '🏠', label: 'Home' },
+  { path: '/rent', icon: '🔑', label: 'Rent' },
+  { path: '/buy', icon: '🏢', label: 'Buy' },
   { path: '/favorites', icon: '⭐', label: 'Favorites' },
   { path: '/search', icon: '🔍', label: 'Search' },
-  { path: '/search/results', icon: '📋', label: 'Findings' },
 ];
 
 export default function NavBar() {
@@ -15,9 +15,7 @@ export default function NavBar() {
     <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
       <div className="max-w-lg mx-auto flex">
         {tabs.map(tab => {
-          const isActive = tab.path === '/'
-            ? location.pathname === '/'
-            : location.pathname.startsWith(tab.path);
+          const isActive = location.pathname.startsWith(tab.path);
           return (
             <button
               key={tab.path}

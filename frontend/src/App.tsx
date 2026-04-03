@@ -1,6 +1,6 @@
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import NavBar from './components/NavBar';
-import HomePage from './pages/HomePage';
+import OpportunityPage from './pages/OpportunityPage';
 import FavoritesPage from './pages/FavoritesPage';
 import SearchPage from './pages/SearchPage';
 import SearchResultsPage from './pages/SearchResultsPage';
@@ -10,7 +10,9 @@ export default function App() {
   return (
     <div className="pb-16">
       <Routes>
-        <Route path="/" element={<HomePage />} />
+        <Route path="/" element={<Navigate to="/rent" replace />} />
+        <Route path="/rent" element={<OpportunityPage category="rent" />} />
+        <Route path="/buy" element={<OpportunityPage category="forsale" />} />
         <Route path="/favorites" element={<FavoritesPage />} />
         <Route path="/search" element={<SearchPage />} />
         <Route path="/search/results" element={<SearchResultsPage />} />

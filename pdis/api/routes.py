@@ -2,9 +2,10 @@
 PDIS API routes.
 """
 
+import json
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from pydantic import BaseModel
 from typing import Optional
 
@@ -51,12 +52,18 @@ async def list_presets(is_active: bool | None = Query(default=None)):
 
 # IMPORTANT: /api/presets/stats/latest must be registered BEFORE /api/presets/{preset_id}/stats
 @router.get("/api/presets/stats/latest")
-async def get_latest_preset_stats():
+async def get_latest_preset_stats(category: str | None = Query(default=None)):
     """Return the latest stats for ALL presets (one row per preset from the most recent session)."""
+    category_clause = ""
+    params_list: list = []
+    if category:
+        category_clause = "AND sp.category = %s"
+        params_list.append(category)
+
     async with _db.pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                """
+                f"""
                 SELECT DISTINCT ON (sps.preset_id)
                     sps.preset_id, sp.name AS preset_name,
                     sps.session_id, sps.total_active, sps.new_listings,
@@ -64,8 +71,11 @@ async def get_latest_preset_stats():
                     sps.opportunities, sps.created_at
                 FROM scan_preset_stats sps
                 JOIN search_presets sp ON sp.id = sps.preset_id
+                WHERE TRUE
+                {category_clause}
                 ORDER BY sps.preset_id, sps.created_at DESC
-                """
+                """,
+                tuple(params_list),
             )
             rows = await cur.fetchall()
     return {"presets": [dict(r) for r in rows]}
@@ -91,6 +101,182 @@ async def get_preset_stats(preset_id: int):
     return {"preset_id": preset_id, "stats": [dict(r) for r in rows]}
 
 
+@router.post("/api/presets")
+async def create_preset(request: Request):
+    body = await request.json()
+    name = body.get("name", "").strip()
+    if not name:
+        raise HTTPException(400, "Name is required")
+
+    city_code = body.get("city_code", "").strip()
+    source = body.get("source", "yad2")
+
+    extra_params: dict = {}
+    if source == "madlan":
+        extra_params["source"] = "madlan"
+        extra_params["madlan_city"] = body.get("madlan_city", city_code)
+    elif source == "both":
+        extra_params["source"] = "both"
+
+    # Advanced filter params stored in extra_params JSONB
+    for key in ["min_sqm", "max_sqm", "min_floor", "max_floor", "enter_date",
+                "img_only", "parking", "elevator", "air_conditioning", "balcony",
+                "pets", "furniture", "mamad", "accessible"]:
+        val = body.get(key)
+        if val is not None:
+            extra_params[key] = val
+
+    extra_params_json = json.dumps(extra_params) if extra_params else None
+
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO search_presets
+                    (name, category, city_code, area_code, neighborhood, property_types,
+                     min_price, max_price, min_rooms, max_rooms, extra_params, is_active)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING *
+                """,
+                (
+                    name,
+                    body.get("category", "rent"),
+                    city_code,
+                    body.get("area_code") or None,
+                    body.get("neighborhood") or None,
+                    body.get("property_types") or None,
+                    body.get("min_price"),
+                    body.get("max_price"),
+                    body.get("min_rooms"),
+                    body.get("max_rooms"),
+                    extra_params_json,
+                    body.get("is_active", True),
+                ),
+            )
+            row = await cur.fetchone()
+        await conn.commit()
+    return dict(row)
+
+
+@router.put("/api/presets/{preset_id}")
+async def update_preset(preset_id: int, request: Request):
+    body = await request.json()
+
+    source = body.get("source", "yad2")
+    extra_params: dict = {}
+    if source == "madlan":
+        extra_params["source"] = "madlan"
+        extra_params["madlan_city"] = body.get("madlan_city", body.get("city_code", ""))
+    elif source == "both":
+        extra_params["source"] = "both"
+
+    # Advanced filter params stored in extra_params JSONB
+    for key in ["min_sqm", "max_sqm", "min_floor", "max_floor", "enter_date",
+                "img_only", "parking", "elevator", "air_conditioning", "balcony",
+                "pets", "furniture", "mamad", "accessible"]:
+        val = body.get(key)
+        if val is not None:
+            extra_params[key] = val
+
+    extra_params_json = json.dumps(extra_params) if extra_params else None
+
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                UPDATE search_presets SET
+                    name = COALESCE(%s, name),
+                    category = COALESCE(%s, category),
+                    city_code = COALESCE(%s, city_code),
+                    area_code = COALESCE(%s, area_code),
+                    neighborhood = COALESCE(%s, neighborhood),
+                    property_types = COALESCE(%s, property_types),
+                    min_price = %s,
+                    max_price = %s,
+                    min_rooms = %s,
+                    max_rooms = %s,
+                    extra_params = %s,
+                    is_active = COALESCE(%s, is_active),
+                    updated_at = NOW()
+                WHERE id = %s
+                RETURNING *
+                """,
+                (
+                    body.get("name"),
+                    body.get("category"),
+                    body.get("city_code"),
+                    body.get("area_code") or None,
+                    body.get("neighborhood") or None,
+                    body.get("property_types") or None,
+                    body.get("min_price"),
+                    body.get("max_price"),
+                    body.get("min_rooms"),
+                    body.get("max_rooms"),
+                    extra_params_json,
+                    body.get("is_active"),
+                    preset_id,
+                ),
+            )
+            row = await cur.fetchone()
+        if not row:
+            raise HTTPException(404, "Preset not found")
+        await conn.commit()
+    return dict(row)
+
+
+@router.delete("/api/presets/{preset_id}")
+async def delete_preset(preset_id: int):
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            # Check preset exists
+            await cur.execute("SELECT id FROM search_presets WHERE id = %s", (preset_id,))
+            preset = await cur.fetchone()
+            if not preset:
+                raise HTTPException(404, "Preset not found")
+
+            # Get session IDs for this preset
+            await cur.execute("SELECT id FROM scan_sessions WHERE preset_id = %s", (preset_id,))
+            session_rows = await cur.fetchall()
+            session_ids = [r["id"] for r in session_rows]
+
+            if session_ids:
+                await cur.execute(
+                    "DELETE FROM scan_preset_stats WHERE preset_id = %s", (preset_id,))
+                await cur.execute(
+                    "DELETE FROM property_events WHERE session_id = ANY(%s)", (session_ids,))
+                await cur.execute(
+                    "DELETE FROM property_snapshots WHERE session_id = ANY(%s)", (session_ids,))
+                await cur.execute(
+                    "DELETE FROM scan_sessions WHERE preset_id = %s", (preset_id,))
+
+            # Disconnect properties (keep them — they may be favorited)
+            await cur.execute(
+                "UPDATE properties SET preset_id = NULL WHERE preset_id = %s", (preset_id,))
+
+            # Delete the preset itself
+            await cur.execute("DELETE FROM search_presets WHERE id = %s", (preset_id,))
+        await conn.commit()
+    return {"deleted": True}
+
+
+@router.patch("/api/presets/{preset_id}/toggle")
+async def toggle_preset(preset_id: int):
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                UPDATE search_presets SET is_active = NOT is_active, updated_at = NOW()
+                WHERE id = %s RETURNING id, is_active
+                """,
+                (preset_id,),
+            )
+            row = await cur.fetchone()
+            if not row:
+                raise HTTPException(404, "Preset not found")
+        await conn.commit()
+    return dict(row)
+
+
 # ---------------------------------------------------------------------------
 # Scan
 # ---------------------------------------------------------------------------
@@ -103,6 +289,35 @@ async def trigger_all_scans():
         logger.error("api.scan_all_error", error=str(exc))
         raise HTTPException(status_code=500, detail=str(exc))
     return {"scans": results}
+
+
+@router.post("/api/scan/scheduled")
+async def trigger_scheduled_scan(request: Request, background_tasks: BackgroundTasks):
+    """Endpoint for external cron service. Requires CRON_SECRET auth."""
+    from pdis.config import settings
+
+    # Check auth
+    auth_header = request.headers.get("Authorization", "")
+    expected = f"Bearer {settings.cron_secret}"
+    if not settings.cron_secret or auth_header != expected:
+        raise HTTPException(status_code=403, detail="Invalid or missing cron secret")
+
+    # Check if scan already running
+    from pdis.scanner import get_scan_status, scheduled_scan
+    status = get_scan_status()
+    if status["running"]:
+        raise HTTPException(status_code=409, detail="Scan already in progress")
+
+    # Fire and forget
+    background_tasks.add_task(scheduled_scan)
+    return {"status": "started", "message": "Scan triggered in background"}
+
+
+@router.get("/api/scan/status")
+async def scan_status():
+    """Check if a scan is currently running."""
+    from pdis.scanner import get_scan_status
+    return get_scan_status()
 
 
 class OpenSearchBody(BaseModel):
@@ -124,7 +339,7 @@ async def trigger_open_scan(body: OpenSearchBody):
                    VALUES (%s, %s, %s, %s, %s, %s, %s, FALSE)
                    RETURNING id""",
                 (
-                    f"Recherche libre {datetime.now().strftime('%d.%m %H:%M')}",
+                    f"Open search {datetime.now().strftime('%d.%m %H:%M')}",
                     body.category,
                     body.city_code,
                     body.min_price,
@@ -237,6 +452,46 @@ async def list_properties(
         "per_page": per_page,
         "properties": [dict(r) for r in rows],
     }
+
+
+@router.get("/api/properties/search")
+async def search_properties(q: str = "", category: str | None = Query(default=None)):
+    if not q or len(q) < 2:
+        return {"properties": []}
+
+    search_term = f"%{q}%"
+    category_clause = ""
+    params_list: list = [search_term, search_term, search_term, search_term, search_term, search_term]
+    if category:
+        category_clause = "AND p.category = %s"
+        params_list.append(category)
+
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                f"""
+                SELECT p.*,
+                       pc.classification, pc.signal_details
+                FROM properties p
+                LEFT JOIN property_classifications pc ON pc.property_id = p.id
+                WHERE (
+                    p.address_street ILIKE %s
+                   OR p.address_home_number ILIKE %s
+                   OR p.neighborhood ILIKE %s
+                   OR p.address_city ILIKE %s
+                   OR p.description ILIKE %s
+                   OR CONCAT(p.address_street, ' ', p.address_home_number) ILIKE %s
+                )
+                {category_clause}
+                ORDER BY CASE pc.classification WHEN 'hot' THEN 1 WHEN 'warm' THEN 2 ELSE 3 END,
+                         p.updated_at DESC
+                LIMIT 100
+                """,
+                tuple(params_list),
+            )
+            rows = await cur.fetchall()
+
+    return {"properties": [dict(r) for r in rows]}
 
 
 @router.get("/api/properties/{yad2_id}")
@@ -368,20 +623,70 @@ async def get_property_snapshots(yad2_id: str):
 # ---------------------------------------------------------------------------
 
 @router.get("/api/events/recent")
-async def list_recent_events():
+async def list_recent_events(category: str | None = Query(default=None)):
+    category_clause = ""
+    params_list: list = []
+    if category:
+        category_clause = "AND p.category = %s"
+        params_list.append(category)
+
     async with _db.pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                """
+                f"""
                 SELECT pe.*, p.yad2_id, p.address_street, p.address_city
                 FROM property_events pe
                 JOIN properties p ON p.id = pe.property_id
+                WHERE TRUE
+                {category_clause}
                 ORDER BY pe.created_at DESC
                 LIMIT 50
-                """
+                """,
+                tuple(params_list),
             )
             rows = await cur.fetchall()
     return {"events": [dict(r) for r in rows]}
+
+
+# IMPORTANT: /api/events/properties must be registered BEFORE /api/events to avoid path conflicts
+@router.get("/api/events/properties")
+async def get_event_properties(
+    event_type: str = Query(...),
+    category: str | None = Query(default=None),
+):
+    """Return full property data for properties that have events of a given type."""
+    category_clause = ""
+    params_list: list = [event_type]
+    if category:
+        category_clause = "AND p.category = %s"
+        params_list.append(category)
+
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                f"""
+                SELECT DISTINCT ON (p.id)
+                    pc.*, p.*,
+                    (SELECT ARRAY_AGG(DISTINCT p2.source)
+                     FROM property_matches pm
+                     JOIN properties p2 ON p2.id = CASE
+                         WHEN pm.property_id_a = p.id THEN pm.property_id_b
+                         ELSE pm.property_id_a END
+                     WHERE pm.property_id_a = p.id OR pm.property_id_b = p.id
+                    ) AS matched_sources
+                FROM properties p
+                JOIN property_events pe ON pe.property_id = p.id
+                LEFT JOIN property_classifications pc ON pc.property_id = p.id
+                WHERE pe.event_type = %s
+                  AND p.is_active = TRUE
+                {category_clause}
+                ORDER BY p.id
+                """,
+                tuple(params_list),
+            )
+            rows = await cur.fetchall()
+
+    return {"properties": [dict(r) for r in rows]}
 
 
 @router.get("/api/events")
@@ -682,6 +987,7 @@ async def get_property_signals(yad2_id: str):
 async def list_classifications(
     classification: str | None = Query(default=None),
     min_score: float | None = Query(default=None),
+    category: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     per_page: int = Query(default=50, ge=1, le=1000),
 ):
@@ -694,6 +1000,9 @@ async def list_classifications(
     if min_score is not None:
         conditions.append("pc.distress_score >= %s")
         params.append(min_score)
+    if category is not None:
+        conditions.append("p.category = %s")
+        params.append(category)
 
     where = "WHERE " + " AND ".join(conditions) if conditions else ""
     offset = (page - 1) * per_page
@@ -718,7 +1027,7 @@ async def list_classifications(
                        p.address_home_number, p.price, p.rooms, p.neighborhood, p.days_on_market,
                        p.square_meters, p.image_urls, p.listing_url,
                        p.is_agent, p.parking, p.elevator, p.air_conditioning,
-                       p.source,
+                       p.source, p.description, p.contact_name,
                        (SELECT ARRAY_AGG(DISTINCT p2.source)
                         FROM property_matches pm
                         JOIN properties p2 ON p2.id = CASE
@@ -729,7 +1038,11 @@ async def list_classifications(
                 FROM property_classifications pc
                 JOIN properties p ON p.id = pc.property_id
                 {where}
-                ORDER BY pc.distress_score DESC
+                ORDER BY CASE pc.classification
+                    WHEN 'hot' THEN 1
+                    WHEN 'warm' THEN 2
+                    ELSE 3
+                END, pc.updated_at DESC
                 LIMIT %s OFFSET %s
                 """,
                 params + [per_page, offset],
@@ -748,26 +1061,35 @@ async def list_classifications(
 async def list_opportunities(
     page: int = Query(default=1, ge=1),
     per_page: int = Query(default=50, ge=1, le=1000),
+    category: str | None = Query(default=None),
 ):
     offset = (page - 1) * per_page
+    category_clause = ""
+    count_params: list = []
+    if category:
+        category_clause = "AND p.category = %s"
+        count_params.append(category)
 
     async with _db.pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                """
+                f"""
                 SELECT COUNT(*) AS total
                 FROM property_classifications pc
                 JOIN properties p ON p.id = pc.property_id
                 LEFT JOIN blacklist bl ON bl.property_id = pc.property_id
                 WHERE pc.classification IN ('hot', 'warm')
                   AND bl.id IS NULL
-                """
+                {category_clause}
+                """,
+                tuple(count_params),
             )
             count_row = await cur.fetchone()
             total = count_row["total"] if count_row else 0
 
+            main_params: list = list(count_params)
             await cur.execute(
-                """
+                f"""
                 SELECT pc.*, p.*,
                        (SELECT ARRAY_AGG(DISTINCT p2.source)
                         FROM property_matches pm
@@ -781,10 +1103,15 @@ async def list_opportunities(
                 LEFT JOIN blacklist bl ON bl.property_id = pc.property_id
                 WHERE pc.classification IN ('hot', 'warm')
                   AND bl.id IS NULL
-                ORDER BY pc.distress_score DESC
+                {category_clause}
+                ORDER BY CASE pc.classification
+                    WHEN 'hot' THEN 1
+                    WHEN 'warm' THEN 2
+                    ELSE 3
+                END, pc.updated_at DESC
                 LIMIT %s OFFSET %s
                 """,
-                [per_page, offset],
+                tuple(main_params) + (per_page, offset),
             )
             rows = await cur.fetchall()
 
@@ -798,7 +1125,31 @@ async def list_opportunities(
 
 # ---------------------------------------------------------------------------
 # Whitelist / Blacklist
+# IMPORTANT: /api/whitelist/ids and /api/blacklist/ids must be registered
+# BEFORE /api/whitelist/{yad2_id} and /api/blacklist/{yad2_id}
 # ---------------------------------------------------------------------------
+
+@router.get("/api/whitelist/ids")
+async def get_whitelist_ids():
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT p.yad2_id FROM whitelist w JOIN properties p ON w.property_id = p.id"
+            )
+            rows = await cur.fetchall()
+    return {"ids": [r["yad2_id"] for r in rows]}
+
+
+@router.get("/api/blacklist/ids")
+async def get_blacklist_ids():
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT p.yad2_id FROM blacklist b JOIN properties p ON b.property_id = p.id"
+            )
+            rows = await cur.fetchall()
+    return {"ids": [r["yad2_id"] for r in rows]}
+
 
 class ListReason(BaseModel):
     reason: str | None = None
@@ -1029,16 +1380,21 @@ async def get_session_changes(session_id: int):
 # ---------------------------------------------------------------------------
 
 @router.get("/api/stats")
-async def get_stats():
+async def get_stats(category: str | None = Query(default=None)):
+    cat_filter = "AND category = %s" if category else ""
+    cat_param = (category,) if category else ()
+
     async with _db.pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT COUNT(*) AS total_properties FROM properties"
+                f"SELECT COUNT(*) AS total_properties FROM properties WHERE TRUE {cat_filter}",
+                cat_param,
             )
             total_row = await cur.fetchone()
 
             await cur.execute(
-                "SELECT COUNT(*) AS active_properties FROM properties WHERE is_active = TRUE"
+                f"SELECT COUNT(*) AS active_properties FROM properties WHERE is_active = TRUE {cat_filter}",
+                cat_param,
             )
             active_row = await cur.fetchone()
 
@@ -1053,20 +1409,24 @@ async def get_stats():
             snaps_row = await cur.fetchone()
 
             await cur.execute(
-                """
+                f"""
                 SELECT AVG(price) AS avg_price, MIN(price) AS min_price, MAX(price) AS max_price
                 FROM properties
                 WHERE is_active = TRUE AND price IS NOT NULL
-                """
+                {cat_filter}
+                """,
+                cat_param,
             )
             price_row = await cur.fetchone()
 
             await cur.execute(
-                """
+                f"""
                 SELECT AVG(days_on_market) AS avg_days_on_market
                 FROM properties
                 WHERE is_active = TRUE
-                """
+                {cat_filter}
+                """,
+                cat_param,
             )
             dom_row = await cur.fetchone()
 
@@ -1079,25 +1439,59 @@ async def get_stats():
             )
             session_status_rows = await cur.fetchall()
 
-            await cur.execute("SELECT COUNT(*) AS total_events FROM property_events")
+            if category:
+                await cur.execute(
+                    """
+                    SELECT COUNT(*) AS total_events FROM property_events pe
+                    JOIN properties p ON p.id = pe.property_id
+                    WHERE p.category = %s
+                    """,
+                    (category,),
+                )
+            else:
+                await cur.execute("SELECT COUNT(*) AS total_events FROM property_events")
             events_total_row = await cur.fetchone()
 
-            await cur.execute(
-                """
-                SELECT event_type, COUNT(*) AS cnt
-                FROM property_events
-                GROUP BY event_type
-                """
-            )
+            if category:
+                await cur.execute(
+                    """
+                    SELECT pe.event_type, COUNT(*) AS cnt
+                    FROM property_events pe
+                    JOIN properties p ON p.id = pe.property_id
+                    WHERE p.category = %s
+                    GROUP BY pe.event_type
+                    """,
+                    (category,),
+                )
+            else:
+                await cur.execute(
+                    """
+                    SELECT event_type, COUNT(*) AS cnt
+                    FROM property_events
+                    GROUP BY event_type
+                    """
+                )
             events_by_type_rows = await cur.fetchall()
 
-            await cur.execute(
-                """
-                SELECT classification, COUNT(*) AS cnt
-                FROM property_classifications
-                GROUP BY classification
-                """
-            )
+            if category:
+                await cur.execute(
+                    """
+                    SELECT pc.classification, COUNT(*) AS cnt
+                    FROM property_classifications pc
+                    JOIN properties p ON p.id = pc.property_id
+                    WHERE p.category = %s
+                    GROUP BY pc.classification
+                    """,
+                    (category,),
+                )
+            else:
+                await cur.execute(
+                    """
+                    SELECT classification, COUNT(*) AS cnt
+                    FROM property_classifications
+                    GROUP BY classification
+                    """
+                )
             classifications_rows = await cur.fetchall()
 
             await cur.execute("SELECT COUNT(*) AS cnt FROM whitelist")
@@ -1105,6 +1499,13 @@ async def get_stats():
 
             await cur.execute("SELECT COUNT(*) AS cnt FROM blacklist")
             blacklist_row = await cur.fetchone()
+
+            await cur.execute("""
+                SELECT MAX(finished_at) as last_scan_at
+                FROM scan_sessions
+                WHERE status = 'done'
+            """)
+            last_scan_row = await cur.fetchone()
 
     classifications_counts = {"hot": 0, "warm": 0, "cold": 0}
     for r in classifications_rows:
@@ -1131,6 +1532,7 @@ async def get_stats():
         "classifications": classifications_counts,
         "whitelisted": whitelist_row["cnt"] if whitelist_row else 0,
         "blacklisted": blacklist_row["cnt"] if blacklist_row else 0,
+        "last_scan_at": last_scan_row["last_scan_at"].isoformat() if last_scan_row and last_scan_row["last_scan_at"] else None,
     }
 
 

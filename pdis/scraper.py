@@ -19,13 +19,12 @@ from pdis.models import ScrapedListing, ScrapeResult
 
 logger = structlog.get_logger(__name__)
 
-YAD2_FEED_URL = "https://www.yad2.co.il/api/pre-load/getFeedIndex/realestate/rent"
+YAD2_FEED_BASE = "https://www.yad2.co.il/api/pre-load/getFeedIndex/realestate"
 YAD2_BASE_URL = "https://www.yad2.co.il"
 
 HEADERS = {
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "he-IL,he;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Referer": "https://www.yad2.co.il/realestate/rent",
 }
 
 # Property type mapping from HomeTypeID_text (Hebrew) to English
@@ -130,8 +129,8 @@ def _parse_listing(item: dict, category: str = "rent") -> ScrapedListing | None:
     link_token = item.get("id") or item.get("link_token", "")
     listing_url = f"{YAD2_BASE_URL}/item/{link_token}" if link_token else ""
 
-    # Description from search_text is verbose; use address_more if available
-    description = item.get("address_more") or None
+    # Use search_text (full listing text with keywords like דחוף) as primary, fall back to address_more
+    description = item.get("search_text") or item.get("address_more") or None
 
     coords = item.get("coordinates") or {}
     latitude = None
@@ -239,9 +238,42 @@ def _build_params(preset: dict, page: int = 1) -> dict:
         hi = max_rooms or 20
         params["rooms"] = f"{lo}-{hi}"
 
-    # Merge any extra_params
+    if preset.get("property_types"):
+        params["property"] = ",".join(preset["property_types"])
+
+    if preset.get("neighborhood"):
+        params["neighborhood"] = preset["neighborhood"]
+
     extra = preset.get("extra_params") or {}
-    params.update(extra)
+
+    if extra.get("min_sqm") or extra.get("max_sqm"):
+        min_s = extra.get("min_sqm", "")
+        max_s = extra.get("max_sqm", "")
+        params["squaremeter"] = f"{min_s}-{max_s}"
+
+    if extra.get("min_floor") or extra.get("max_floor"):
+        min_f = extra.get("min_floor", "")
+        max_f = extra.get("max_floor", "")
+        params["floor"] = f"{min_f}-{max_f}"
+
+    if extra.get("enter_date"):
+        params["enterDate"] = extra["enter_date"]
+
+    # Boolean amenity params — Yad2 uses "1" for true
+    yad2_key_map = {
+        "airConditioner": "air_conditioning",
+        "handicapped": "accessible",
+    }
+    for yad2_key in ["parking", "elevator", "airConditioner", "balcony", "pets", "furniture", "mamad", "handicapped"]:
+        our_key = yad2_key_map.get(yad2_key, yad2_key)
+        if extra.get(our_key):
+            params[yad2_key] = "1"
+
+    if extra.get("img_only"):
+        params["imgOnly"] = "1"
+
+    if extra.get("renovated"):
+        params["Meshupatz"] = "1"
 
     return params
 
@@ -271,11 +303,16 @@ async def scrape_preset(preset: dict) -> ScrapeResult:
     was_blocked = False
     category = preset.get("category", "rent")
 
+    slug = "forsale" if category == "forsale" else "rent"
+    feed_url = f"{YAD2_FEED_BASE}/{slug}"
+    referer = f"https://www.yad2.co.il/realestate/{slug}"
+
     log = logger.bind(preset_id=preset.get("id"), preset_name=preset.get("name"))
     log.info("scraper.starting")
 
     with cf_requests.Session(impersonate="chrome") as session:
         session.headers.update(HEADERS)
+        session.headers.update({"Referer": referer})
 
         page = 1
         last_page = 1
@@ -285,7 +322,7 @@ async def scrape_preset(preset: dict) -> ScrapeResult:
 
             try:
                 response = session.get(
-                    YAD2_FEED_URL,
+                    feed_url,
                     params=params,
                     timeout=settings.scrape_request_timeout,
                 )

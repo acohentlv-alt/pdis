@@ -7,6 +7,10 @@ interface PropertyCardProps {
   item: Record<string, unknown>;
   favoriteIds?: Set<string>;
   onToggleFavorite?: (yad2Id: string, isFav: boolean) => void;
+  isWhitelisted?: boolean;
+  isBlacklisted?: boolean;
+  onToggleWhitelist?: () => void;
+  onToggleBlacklist?: () => void;
 }
 
 function getSignalDetails(item: Record<string, unknown>): Record<string, unknown> {
@@ -16,7 +20,15 @@ function getSignalDetails(item: Record<string, unknown>): Record<string, unknown
   return {};
 }
 
-export default function PropertyCard({ item, favoriteIds, onToggleFavorite }: PropertyCardProps) {
+export default function PropertyCard({
+  item,
+  favoriteIds,
+  onToggleFavorite,
+  isWhitelisted,
+  isBlacklisted,
+  onToggleWhitelist,
+  onToggleBlacklist,
+}: PropertyCardProps) {
   const navigate = useNavigate();
   const yad2Id = item.yad2_id as string;
   const classification = (item.classification as string) ?? 'cold';
@@ -28,11 +40,20 @@ export default function PropertyCard({ item, favoriteIds, onToggleFavorite }: Pr
   const dom = (item.days_on_market as number) ?? 0;
   const neighborhood = item.neighborhood as string | null;
 
+  const strongSignals = (sd.strong_signals as string[]) ?? [];
+  const weakSignals = (sd.weak_signals as string[]) ?? [];
+  const hasStrongOrWeak = strongSignals.length > 0 || weakSignals.length > 0;
+
+  // Backwards compat: support both old and new signal_details shapes
   const priceDrop = (sd.price_drops as number ?? 0) > 0;
-  const hasRelisting = !!(sd.has_relisting);
+  const hasRelisting = hasStrongOrWeak
+    ? (sd.relisting_count as number ?? 0) > 0
+    : !!(sd.has_relisting);
   const longListed = dom > 60;
   const weakLanguage = Array.isArray(sd.weak_language_found) && (sd.weak_language_found as unknown[]).length > 0;
   const conditionAlert = Array.isArray(sd.condition_keywords_found) && (sd.condition_keywords_found as unknown[]).length > 0;
+  const belowAvgPrice = !!(sd.below_avg_price_sqm);
+  const moveInUrgent = !!(sd.move_in_urgency);
 
   const imageUrls = (item.image_urls as string[] | null) ?? [];
   const isAgent = !!(item.is_agent);
@@ -82,6 +103,32 @@ export default function PropertyCard({ item, favoriteIds, onToggleFavorite }: Pr
               {isFav ? '⭐' : '☆'}
             </button>
           )}
+          {onToggleWhitelist && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggleWhitelist(); }}
+              className={`text-sm px-1.5 py-0.5 rounded font-bold transition-colors ${
+                isWhitelisted
+                  ? 'bg-green-100 text-green-700'
+                  : 'bg-gray-100 text-gray-400'
+              }`}
+              title={isWhitelisted ? 'Remove from whitelist' : 'Add to whitelist'}
+            >
+              ✓
+            </button>
+          )}
+          {onToggleBlacklist && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggleBlacklist(); }}
+              className={`text-sm px-1.5 py-0.5 rounded font-bold transition-colors ${
+                isBlacklisted
+                  ? 'bg-red-100 text-red-700'
+                  : 'bg-gray-100 text-gray-400'
+              }`}
+              title={isBlacklisted ? 'Remove from blacklist' : 'Add to blacklist'}
+            >
+              ✕
+            </button>
+          )}
           {allSources.has('yad2') && (
             <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">Y2</span>
           )}
@@ -124,6 +171,12 @@ export default function PropertyCard({ item, favoriteIds, onToggleFavorite }: Pr
         )}
         {conditionAlert && (
           <span className="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full">🔧 Condition</span>
+        )}
+        {belowAvgPrice && (
+          <span className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full">↓ Below avg</span>
+        )}
+        {moveInUrgent && (
+          <span className="text-xs bg-red-50 text-red-600 px-2 py-0.5 rounded-full">🚨 Urgent move-in</span>
         )}
       </div>
 

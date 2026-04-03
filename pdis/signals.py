@@ -1,4 +1,6 @@
-"""Distress signal calculator — batch mode."""
+"""Distress signal calculator — batch mode, tier-based."""
+from datetime import date, timedelta
+
 import structlog
 
 import pdis.database as _db
@@ -8,9 +10,9 @@ logger = structlog.get_logger(__name__)
 
 async def compute_signals_batch(property_ids: list[int]) -> dict[int, dict]:
     """
-    Compute distress scores for a batch of properties.
-    Uses BATCH queries (2 queries total, not per-property).
-    Returns {property_id: {"distress_score": float, "details": dict}}
+    Compute distress signals for a batch of properties.
+    Uses BATCH queries (3 queries total, not per-property).
+    Returns {property_id: {"distress_score": float, "strong_signals": list, "weak_signals": list, "details": dict}}
     """
     if not property_ids:
         return {}
@@ -29,12 +31,26 @@ async def compute_signals_batch(property_ids: list[int]) -> dict[int, dict]:
 
             # BATCH QUERY 2: Property metadata
             await cur.execute(
-                """SELECT id, days_on_market, price, description
+                """SELECT id, days_on_market, price, description,
+                          move_in_date, square_meters, neighborhood, is_agent, renovated
                    FROM properties
                    WHERE id = ANY(%s)""",
                 (property_ids,),
             )
             prop_rows = await cur.fetchall()
+
+            # BATCH QUERY 3: Neighborhood avg price per sqm
+            await cur.execute("""
+                SELECT neighborhood,
+                       AVG(price / NULLIF(square_meters, 0)) as avg_price_sqm,
+                       COUNT(*) as cnt
+                FROM properties
+                WHERE price > 0 AND square_meters > 0 AND neighborhood IS NOT NULL AND is_active = TRUE
+                GROUP BY neighborhood
+                HAVING COUNT(*) >= 5
+            """)
+            hood_avg_rows = await cur.fetchall()
+            hood_avgs = {r["neighborhood"]: float(r["avg_price_sqm"]) for r in hood_avg_rows}
 
     # Group events by property
     events_by_prop: dict[int, list[dict]] = {}
@@ -50,7 +66,7 @@ async def compute_signals_batch(property_ids: list[int]) -> dict[int, dict]:
     for pid in property_ids:
         events = events_by_prop.get(pid, [])
         prop = props.get(pid, {})
-        results[pid] = _compute_single(pid, events, prop)
+        results[pid] = _compute_single(pid, events, prop, hood_avgs)
 
     return results
 
@@ -62,84 +78,135 @@ WEAK_LANGUAGE_KEYWORDS = [
     "חייבים", "בהזדמנות", "מחיר שפוי",
 ]
 
-# Condition keywords — property needs renovation or is old/untouched
+# Condition keywords — specific distress PHRASES only
+# Root words like "שיפוץ" cause false positives ("לאחר שיפוץ" = after renovation = positive)
+# Only match phrases that unambiguously indicate the property needs work
 CONDITION_KEYWORDS = [
-    "דירת סבתא",
-    "דרוש שיפוץ",
-    "דרוש ריענון",
-    "ריענון",
+    "דרוש שיפוץ",    # needs renovation
+    "צריך שיפוץ",    # requires renovation
+    "לשיפוץ",        # for renovation
+    "דורש שיפוץ",    # demands renovation
+    "טעון שיפוץ",    # in need of renovation
+    "דירת סבתא",     # grandma apartment (always = old/untouched)
+    "דורש ריענון",    # needs refreshing
+    "טעון ריענון",    # in need of refreshing
 ]
 
 
-def _compute_single(pid: int, events: list[dict], prop: dict) -> dict:
-    """Compute distress score for a single property. Pure function, no DB calls."""
-    score = 0.0
+def _compute_single(pid: int, events: list[dict], prop: dict, hood_avgs: dict) -> dict:
+    """Compute tier-based signals for a single property. Pure function, no DB calls."""
+    strong_signals = []
+    weak_signals = []
     details = {
         "price_drops": 0,
         "largest_drop_pct": 0.0,
+        "relisting_count": 0,
         "days_on_market": 0,
-        "has_relisting": False,
         "desc_changes": 0,
         "img_changes": 0,
         "weak_language_found": [],
         "condition_keywords_found": [],
+        "below_avg_price_sqm": False,
+        "move_in_urgency": False,
+        "neighborhood_avg_price_sqm": None,
+        "property_price_sqm": None,
     }
 
-    # Count events by type
+    # Count events
     for ev in events:
         etype = ev["event_type"]
         if etype == "price_drop":
             details["price_drops"] += 1
-            score += 15
-            # Check drop percentage
             try:
                 old_p = int(ev["old_value"])
                 new_p = int(ev["new_value"])
                 if old_p > 0:
                     drop_pct = ((old_p - new_p) / old_p) * 100
                     details["largest_drop_pct"] = max(details["largest_drop_pct"], drop_pct)
-                    if drop_pct > 10:
-                        score += 10  # bonus for large drop
             except (TypeError, ValueError):
                 pass
         elif etype == "relisting":
-            details["has_relisting"] = True
-            score += 15
+            details["relisting_count"] += 1
         elif etype == "description_change":
             details["desc_changes"] += 1
-            score += 5
         elif etype == "image_change":
             details["img_changes"] += 1
-            score += 5
-
-    # Multiple price drops bonus
-    if details["price_drops"] >= 2:
-        score += 10
 
     # Days on market
     dom = prop.get("days_on_market") or 0
     details["days_on_market"] = dom
-    if dom > 30:
-        score += 10
-    if dom > 60:
-        score += 10
-    if dom > 90:
-        score += 10
 
-    # Weak language detection (Hebrew keywords in description)
+    # Description analysis
     desc = prop.get("description") or ""
     for keyword in WEAK_LANGUAGE_KEYWORDS:
         if keyword in desc:
             details["weak_language_found"].append(keyword)
-            score += 5
-
-    # Condition keywords (renovation/old property signals)
     for keyword in CONDITION_KEYWORDS:
         if keyword in desc:
             details["condition_keywords_found"].append(keyword)
-            score += 5
 
-    # Cap at 100
-    score = min(score, 100.0)
+    # Don't flag condition keywords if property is already marked as renovated
+    if prop.get("renovated"):
+        details["condition_keywords_found"] = []
 
-    return {"distress_score": score, "details": details}
+    # Price/sqm vs neighborhood average
+    price = prop.get("price") or 0
+    sqm = prop.get("square_meters") or 0
+    neighborhood = prop.get("neighborhood")
+    if price > 0 and sqm > 0 and neighborhood and neighborhood in hood_avgs:
+        prop_price_sqm = price / sqm
+        avg_price_sqm = hood_avgs[neighborhood]
+        details["property_price_sqm"] = round(prop_price_sqm, 1)
+        details["neighborhood_avg_price_sqm"] = round(avg_price_sqm, 1)
+        if prop_price_sqm < avg_price_sqm * 0.8:  # 20%+ below average
+            details["below_avg_price_sqm"] = True
+
+    # Move-in date urgency — only if date is in the PAST (unit sitting empty)
+    move_in = prop.get("move_in_date")
+    if move_in:
+        if isinstance(move_in, str):
+            try:
+                move_in = date.fromisoformat(move_in)
+            except ValueError:
+                move_in = None
+        if move_in and isinstance(move_in, date):
+            today = date.today()
+            if move_in < today:
+                details["move_in_urgency"] = True
+
+    # === CLASSIFY SIGNALS INTO TIERS ===
+
+    # STRONG signals (any 1 = hot)
+    if details["largest_drop_pct"] > 10:
+        strong_signals.append("price_drop_gt_10pct")
+    if details["relisting_count"] >= 2:
+        strong_signals.append("relisted_2plus")
+    if dom >= 90:
+        strong_signals.append("listed_90plus_days")
+    if details["weak_language_found"]:
+        strong_signals.append("weak_language")
+    if details["condition_keywords_found"]:
+        strong_signals.append("condition_keywords")
+    if details["below_avg_price_sqm"]:
+        strong_signals.append("below_avg_price")
+
+    # WEAK signals
+    if details["price_drops"] > 0 and "price_drop_gt_10pct" not in strong_signals:
+        weak_signals.append("price_drop_small")
+    if details["relisting_count"] == 1:
+        weak_signals.append("relisted_once")
+    if 30 <= dom < 90 and "listed_90plus_days" not in strong_signals:
+        weak_signals.append("listed_30_60_days")
+    if details["desc_changes"] > 0:
+        weak_signals.append("desc_changes")
+    if details["img_changes"] > 0:
+        weak_signals.append("img_changes")
+    if details["move_in_urgency"]:
+        weak_signals.append("move_in_urgent")
+
+    return {
+        "distress_score": 0.0,  # kept for DB compat, no longer used
+        "strong_signals": strong_signals,
+        "weak_signals": weak_signals,
+        "details": details,
+    }

@@ -1,32 +1,38 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from './client';
 
-export function useStats() {
+export function useStats(category?: string) {
+  const url = category ? `/api/stats?category=${category}` : '/api/stats';
   return useQuery({
-    queryKey: ['stats'],
-    queryFn: () => apiFetch<Record<string, unknown>>('/api/stats'),
+    queryKey: ['stats', category],
+    queryFn: () => apiFetch<Record<string, unknown>>(url),
   });
 }
 
-export function usePresetStats() {
+export function usePresetStats(category?: string) {
+  const url = category ? `/api/presets/stats/latest?category=${category}` : '/api/presets/stats/latest';
   return useQuery({
-    queryKey: ['presetStats'],
-    queryFn: () => apiFetch<{ presets: Record<string, unknown>[] }>('/api/presets/stats/latest'),
+    queryKey: ['presetStats', category],
+    queryFn: () => apiFetch<{ presets: Record<string, unknown>[] }>(url),
   });
 }
 
-export function useOpportunities() {
+export function useOpportunities(category?: string) {
+  const url = category
+    ? `/api/opportunities?category=${category}&per_page=500`
+    : '/api/opportunities?per_page=500';
   return useQuery({
-    queryKey: ['opportunities'],
-    queryFn: () => apiFetch<{ total: number; opportunities: Record<string, unknown>[] }>('/api/opportunities?per_page=500'),
+    queryKey: ['opportunities', category],
+    queryFn: () => apiFetch<{ total: number; opportunities: Record<string, unknown>[] }>(url),
   });
 }
 
-export function useClassifications(classification?: string) {
+export function useClassifications(category?: string, classification?: string) {
   const params = new URLSearchParams({ per_page: '500' });
+  if (category) params.set('category', category);
   if (classification) params.set('classification', classification);
   return useQuery({
-    queryKey: ['classifications', classification],
+    queryKey: ['classifications', category, classification],
     queryFn: () => apiFetch<{ total: number; classifications: Record<string, unknown>[] }>(`/api/classifications?${params}`),
   });
 }
@@ -71,6 +77,13 @@ export function useMatches(yad2Id: string | undefined) {
   });
 }
 
+export function useAllPresets() {
+  return useQuery({
+    queryKey: ['presets', 'all'],
+    queryFn: () => apiFetch<{ presets: Record<string, unknown>[] }>('/api/presets'),
+  });
+}
+
 export function useOpenSearchPresets() {
   return useQuery({
     queryKey: ['openSearchPresets'],
@@ -99,5 +112,40 @@ export function useFavorites() {
   return useQuery({
     queryKey: ['favorites'],
     queryFn: () => apiFetch<{ total: number; favorites: Record<string, unknown>[] }>('/api/favorites'),
+  });
+}
+
+export function usePropertiesByEvent(eventType: string | null, category?: string) {
+  const params = new URLSearchParams();
+  if (eventType) params.set('event_type', eventType);
+  if (category) params.set('category', category);
+  return useQuery({
+    queryKey: ['properties', 'by-event', eventType, category],
+    queryFn: () => apiFetch<{ properties: Record<string, unknown>[] }>(`/api/events/properties?${params}`),
+    enabled: !!eventType,
+  });
+}
+
+export function useWhitelistIds() {
+  return useQuery({
+    queryKey: ['whitelistIds'],
+    queryFn: () => apiFetch<{ ids: string[] }>('/api/whitelist/ids'),
+  });
+}
+
+export function useBlacklistIds() {
+  return useQuery({
+    queryKey: ['blacklistIds'],
+    queryFn: () => apiFetch<{ ids: string[] }>('/api/blacklist/ids'),
+  });
+}
+
+export function usePropertySearch(query: string, category?: string) {
+  const params = new URLSearchParams({ q: query });
+  if (category) params.set('category', category);
+  return useQuery({
+    queryKey: ['propertySearch', query, category],
+    queryFn: () => apiFetch<{ properties: Record<string, unknown>[] }>(`/api/properties/search?${params}`),
+    enabled: query.length >= 2,
   });
 }

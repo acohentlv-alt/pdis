@@ -4,6 +4,7 @@ Scanner orchestrator: load preset → scrape → upsert → snapshots → update
 
 import hashlib
 import json
+import time as _time
 
 import structlog
 
@@ -13,6 +14,10 @@ from pdis.scraper import scrape_preset
 from pdis.scraper_madlan import scrape_madlan_preset
 
 logger = structlog.get_logger(__name__)
+log = logger
+
+_scan_running = False
+_scan_started_at: float | None = None
 
 
 async def _load_preset(preset_id: int) -> dict | None:
@@ -479,3 +484,30 @@ async def run_all_scans() -> list[dict]:
             logger.info("scanner.removals_detected", count=removal_count)
 
     return results
+
+
+async def scheduled_scan() -> dict:
+    """Called by the cron endpoint. Runs all scans with lock protection."""
+    global _scan_running, _scan_started_at
+    if _scan_running:
+        return {"status": "skipped", "reason": "scan already running"}
+
+    _scan_running = True
+    _scan_started_at = _time.time()
+    try:
+        results = await run_all_scans()
+        return {"status": "done", "presets": len(results), "results": results}
+    except Exception as e:
+        log.error("scan.scheduled.error", error=str(e))
+        return {"status": "error", "error": str(e)}
+    finally:
+        _scan_running = False
+        _scan_started_at = None
+
+
+def get_scan_status() -> dict:
+    """Return current scan running state."""
+    result = {"running": _scan_running}
+    if _scan_running and _scan_started_at:
+        result["running_for_seconds"] = int(_time.time() - _scan_started_at)
+    return result

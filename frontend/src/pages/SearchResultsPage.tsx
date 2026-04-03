@@ -1,5 +1,6 @@
-import { useState, useMemo } from 'react';
-import { useOpenSearchPresets, usePropertiesByPreset } from '../api/queries';
+import { useState, useMemo, useEffect } from 'react';
+import { useOpenSearchPresets, usePropertiesByPreset, useFavoriteIds, useWhitelistIds, useBlacklistIds } from '../api/queries';
+import { useAddFavorite, useRemoveFavorite, useWhitelist, useRemoveWhitelist, useBlacklist, useRemoveBlacklist } from '../api/mutations';
 import FilterBar from '../components/FilterBar';
 import PropertyCard from '../components/PropertyCard';
 import { formatDate } from '../lib/format';
@@ -8,7 +9,8 @@ function applyFilters(
   items: Record<string, unknown>[],
   neighborhoods: string[],
   selectedRooms: string[],
-  sortBy: string
+  sortBy: string,
+  keyword: string
 ): Record<string, unknown>[] {
   let result = [...items];
 
@@ -22,6 +24,16 @@ function applyFilters(
       if (selectedRooms.includes('Studio') && r === 0) return true;
       if (selectedRooms.includes('6+') && r >= 6) return true;
       return selectedRooms.includes(String(r));
+    });
+  }
+  if (keyword.trim()) {
+    const kw = keyword.toLowerCase();
+    result = result.filter(i => {
+      const text = [
+        i.description, i.address_street, i.neighborhood,
+        i.contact_name, i.agent_office
+      ].filter(Boolean).join(' ').toLowerCase();
+      return text.includes(kw);
     });
   }
 
@@ -44,17 +56,48 @@ export default function SearchResultsPage() {
   const [neighborhoods, setNeighborhoods] = useState<string[]>([]);
   const [selectedRooms, setSelectedRooms] = useState<string[]>([]);
   const [sortBy, setSortBy] = useState('distress_score');
+  const [keyword, setKeyword] = useState('');
+  const [debouncedKeyword, setDebouncedKeyword] = useState('');
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedKeyword(keyword), 300);
+    return () => clearTimeout(timer);
+  }, [keyword]);
 
   const { data: presetsData, isLoading: presetsLoading } = useOpenSearchPresets();
   const { data: propertiesData, isLoading: propsLoading } = usePropertiesByPreset(selectedPresetId);
+  const { data: favIdsData } = useFavoriteIds();
+  const { data: whitelistData } = useWhitelistIds();
+  const { data: blacklistData } = useBlacklistIds();
+  const favIds = useMemo(() => new Set(favIdsData?.ids ?? []), [favIdsData]);
+  const whitelistIds = useMemo(() => new Set(whitelistData?.ids ?? []), [whitelistData]);
+  const blacklistIds = useMemo(() => new Set(blacklistData?.ids ?? []), [blacklistData]);
+  const addFav = useAddFavorite();
+  const removeFav = useRemoveFavorite();
+  const addWhitelist = useWhitelist();
+  const removeWhitelist = useRemoveWhitelist();
+  const addBlacklist = useBlacklist();
+  const removeBlacklist = useRemoveBlacklist();
+  const handleToggleFav = (yad2Id: string, isFav: boolean) => {
+    if (isFav) removeFav.mutate(yad2Id);
+    else addFav.mutate(yad2Id);
+  };
+  const handleToggleWhitelist = (yad2Id: string) => {
+    if (whitelistIds.has(yad2Id)) removeWhitelist.mutate(yad2Id);
+    else addWhitelist.mutate(yad2Id);
+  };
+  const handleToggleBlacklist = (yad2Id: string) => {
+    if (blacklistIds.has(yad2Id)) removeBlacklist.mutate(yad2Id);
+    else addBlacklist.mutate(yad2Id);
+  };
 
   const rawItems = useMemo(() => {
     return (propertiesData?.properties ?? []) as Record<string, unknown>[];
   }, [propertiesData]);
 
   const filtered = useMemo(
-    () => applyFilters(rawItems, neighborhoods, selectedRooms, sortBy),
-    [rawItems, neighborhoods, selectedRooms, sortBy]
+    () => applyFilters(rawItems, neighborhoods, selectedRooms, sortBy, debouncedKeyword),
+    [rawItems, neighborhoods, selectedRooms, sortBy, debouncedKeyword]
   );
 
   // Results view — a preset is selected
@@ -94,6 +137,8 @@ export default function SearchResultsPage() {
           sortBy={sortBy}
           setSortBy={setSortBy}
           showClassificationFilter={false}
+          keyword={keyword}
+          setKeyword={setKeyword}
         />
 
         {propsLoading && (
@@ -106,7 +151,16 @@ export default function SearchResultsPage() {
 
         <div className="space-y-3 pb-8">
           {filtered.map(item => (
-            <PropertyCard key={item.yad2_id as string} item={item} />
+            <PropertyCard
+              key={item.yad2_id as string}
+              item={item}
+              favoriteIds={favIds}
+              onToggleFavorite={handleToggleFav}
+              isWhitelisted={whitelistIds.has(item.yad2_id as string)}
+              isBlacklisted={blacklistIds.has(item.yad2_id as string)}
+              onToggleWhitelist={() => handleToggleWhitelist(item.yad2_id as string)}
+              onToggleBlacklist={() => handleToggleBlacklist(item.yad2_id as string)}
+            />
           ))}
         </div>
       </div>

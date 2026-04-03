@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     api_port: int = 8090
     log_level: str = "INFO"
     log_format: str = "json"
+    cron_secret: str = ""
 
 
 settings = Settings()

@@ -1,4 +1,4 @@
-"""Rule-based classification engine."""
+"""Tier-based classification engine."""
 import json
 
 import structlog
@@ -35,24 +35,37 @@ async def classify_batch(property_ids: list[int]) -> dict[int, str]:
             )
             blacklisted = {r["property_id"] for r in await cur.fetchall()}
 
-            # Classify each
+            # Classify each property using tier-based rules
             results = {}
             for pid in property_ids:
-                sig = signals.get(pid, {"distress_score": 0, "details": {}})
-                score = sig["distress_score"]
+                sig = signals.get(pid)
+                if not sig:
+                    continue
 
+                strong = sig["strong_signals"]
+                weak = sig["weak_signals"]
+
+                # Tier-based classification
                 if pid in blacklisted:
                     classification = "cold"
                 elif pid in whitelisted:
                     classification = "hot"
-                elif score >= 50:
+                elif len(strong) >= 1:
                     classification = "hot"
-                elif score >= 25:
+                elif len(weak) >= 3:
+                    classification = "hot"
+                elif len(weak) == 2:
                     classification = "warm"
                 else:
                     classification = "cold"
 
                 results[pid] = classification
+
+                signal_details = {
+                    "strong_signals": strong,
+                    "weak_signals": weak,
+                    **sig["details"],
+                }
 
                 # UPSERT into property_classifications
                 await cur.execute(
@@ -64,7 +77,7 @@ async def classify_batch(property_ids: list[int]) -> dict[int, str]:
                            distress_score = EXCLUDED.distress_score,
                            signal_details = EXCLUDED.signal_details,
                            updated_at = NOW()""",
-                    (pid, classification, score, json.dumps(sig["details"])),
+                    (pid, classification, 0.0, json.dumps(signal_details)),
                 )
 
         await conn.commit()
