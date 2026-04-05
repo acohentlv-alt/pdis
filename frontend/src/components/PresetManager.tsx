@@ -554,7 +554,7 @@ export default function PresetManager({ open, onClose, category }: PresetManager
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-white">
+    <div className="fixed inset-0 z-[60] flex flex-col bg-white">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 shrink-0">
         <h2 className="text-lg font-bold text-gray-900">Manage Presets</h2>
@@ -562,7 +562,7 @@ export default function PresetManager({ open, onClose, category }: PresetManager
       </div>
 
       {/* Body */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+      <div className="flex-1 overflow-y-auto px-4 pt-4 pb-16 space-y-3">
 
         {/* Add preset button */}
         {!showCreate && editingId === null && (

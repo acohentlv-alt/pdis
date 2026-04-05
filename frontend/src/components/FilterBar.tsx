@@ -131,9 +131,8 @@ export default function FilterBar({
           onChange={e => setSortBy(e.target.value)}
           className="flex-1 min-w-[130px] border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
         >
-          <option value="signals">Most signals</option>
+          <option value="days_on_market">Market time + Signals</option>
           <option value="price">Price</option>
-          <option value="days_on_market">Days on market</option>
           <option value="price_sqm">Price/sqm</option>
         </select>
 

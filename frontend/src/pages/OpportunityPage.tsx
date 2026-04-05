@@ -112,22 +112,26 @@ function applyFilters(
     });
   }
 
+  const signalCount = (item: Record<string, unknown>) => {
+    const sd = (item.signal_details as Record<string, unknown>) ?? {};
+    const strong = (sd.strong_signals as string[]) ?? [];
+    const weak = (sd.weak_signals as string[]) ?? [];
+    return strong.length + weak.length;
+  };
+
   result.sort((a, b) => {
     if (sortBy === 'price') {
       return ((a.price as number) ?? 0) - ((b.price as number) ?? 0);
-    }
-    if (sortBy === 'days_on_market') {
-      return ((b.days_on_market as number) ?? 0) - ((a.days_on_market as number) ?? 0);
     }
     if (sortBy === 'price_sqm') {
       const aPsqm = ((a.price as number) ?? 0) / (((a.square_meter_build as number) || (a.square_meters as number)) || 1);
       const bPsqm = ((b.price as number) ?? 0) / (((b.square_meter_build as number) || (b.square_meters as number)) || 1);
       return aPsqm - bPsqm;
     }
-    // default: longest on market first, then most recently updated
+    // default: longest on market first, then most signals
     const domDiff = ((b.days_on_market as number) ?? 0) - ((a.days_on_market as number) ?? 0);
     if (domDiff !== 0) return domDiff;
-    return new Date((b.updated_at as string) ?? '').getTime() - new Date((a.updated_at as string) ?? '').getTime();
+    return signalCount(b) - signalCount(a);
   });
 
   return result;
