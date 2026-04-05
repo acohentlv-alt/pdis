@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 interface FilterBarProps {
   items: Record<string, unknown>[];
   neighborhoods: string[];
@@ -13,6 +15,10 @@ interface FilterBarProps {
   showClassificationFilter: boolean;
   keyword: string;
   setKeyword: (v: string) => void;
+  minPriceSqm: string;
+  maxPriceSqm: string;
+  onMinPriceSqmChange: (v: string) => void;
+  onMaxPriceSqmChange: (v: string) => void;
 }
 
 const ROOM_OPTIONS = ['Studio', '1', '1.5', '2', '2.5', '3', '3.5', '4', '4.5', '5', '6+'];
@@ -36,7 +42,13 @@ export default function FilterBar({
   showClassificationFilter,
   keyword,
   setKeyword,
+  minPriceSqm,
+  maxPriceSqm,
+  onMinPriceSqmChange,
+  onMaxPriceSqmChange,
 }: FilterBarProps) {
+  const [showNeighborhoods, setShowNeighborhoods] = useState(false);
+
   const uniqueNeighborhoods = Array.from(new Set(
     items.map(i => i.neighborhood as string).filter(Boolean)
   )).sort();
@@ -60,24 +72,32 @@ export default function FilterBar({
       </div>
 
       <div>
-        <div className="text-xs text-gray-500 mb-1">Neighborhood</div>
-        <div className="flex gap-1.5 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
-          <button
-            onClick={() => setNeighborhoods([])}
-            className={`px-3 py-1.5 text-sm rounded-full whitespace-nowrap shrink-0 border transition-colors ${
-              neighborhoods.length === 0 ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-300'
-            }`}
-          >All</button>
-          {uniqueNeighborhoods.map(n => (
+        <button
+          onClick={() => setShowNeighborhoods(v => !v)}
+          className="text-xs text-gray-500 mb-1 flex items-center gap-1 hover:text-gray-700"
+        >
+          <span>{showNeighborhoods ? '▲' : '▼'}</span>
+          <span>Neighborhood{neighborhoods.length > 0 ? ` (${neighborhoods.length})` : ''}</span>
+        </button>
+        {showNeighborhoods && (
+          <div className="flex gap-1.5 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
             <button
-              key={n}
-              onClick={() => setNeighborhoods(toggleValue(neighborhoods, n))}
+              onClick={() => setNeighborhoods([])}
               className={`px-3 py-1.5 text-sm rounded-full whitespace-nowrap shrink-0 border transition-colors ${
-                neighborhoods.includes(n) ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-300'
+                neighborhoods.length === 0 ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-300'
               }`}
-            >{n}</button>
-          ))}
-        </div>
+            >All</button>
+            {uniqueNeighborhoods.map(n => (
+              <button
+                key={n}
+                onClick={() => setNeighborhoods(toggleValue(neighborhoods, n))}
+                className={`px-3 py-1.5 text-sm rounded-full whitespace-nowrap shrink-0 border transition-colors ${
+                  neighborhoods.includes(n) ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-300'
+                }`}
+              >{n}</button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div>
@@ -133,7 +153,23 @@ export default function FilterBar({
           <option value="signals">Most signals</option>
           <option value="price">Price</option>
           <option value="days_on_market">Days on market</option>
+          <option value="price_sqm">Price/sqm</option>
         </select>
+
+        <input
+          type="number"
+          value={minPriceSqm}
+          onChange={e => onMinPriceSqmChange(e.target.value)}
+          placeholder="Min ₪/sqm"
+          className="w-[100px] border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+        />
+        <input
+          type="number"
+          value={maxPriceSqm}
+          onChange={e => onMaxPriceSqmChange(e.target.value)}
+          placeholder="Max ₪/sqm"
+          className="w-[100px] border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+        />
       </div>
     </div>
   );

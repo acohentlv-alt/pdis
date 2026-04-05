@@ -139,6 +139,10 @@ export default function SearchResultsPage() {
           showClassificationFilter={false}
           keyword={keyword}
           setKeyword={setKeyword}
+          minPriceSqm=""
+          maxPriceSqm=""
+          onMinPriceSqmChange={() => {}}
+          onMaxPriceSqmChange={() => {}}
         />
 
         {propsLoading && (

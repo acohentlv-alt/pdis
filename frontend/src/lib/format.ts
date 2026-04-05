@@ -28,6 +28,20 @@ export const EVENT_LABELS: Record<string, string> = {
   image_change: "Images changed",
 };
 
+export const SIGNAL_LABELS: Record<string, string> = {
+  price_drop_gt_10pct: "Large price drop (>10%)",
+  relisted_2plus: "Relisted 2+ times",
+  listed_90plus_days: "Listed 90+ days",
+  weak_language: "Desperate language",
+  condition_keywords: "Needs renovation",
+  below_avg_price: "Below avg price/sqm",
+  price_drop_small: "Price drop (small)",
+  relisted_once: "Relisted once",
+  listed_30_60_days: "Listed 30-60 days",
+  desc_changes: "Description changed",
+  img_changes: "Images changed",
+};
+
 export const CLASSIFICATION_STYLES: Record<string, { bg: string; label: string; icon: string }> = {
   hot: { bg: "bg-red-500", label: "Hot", icon: "🔥" },
   warm: { bg: "bg-orange-400", label: "Warm", icon: "⚠️" },

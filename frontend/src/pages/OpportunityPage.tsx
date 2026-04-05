@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import SummaryBar from '../components/SummaryBar';
 import FilterBar from '../components/FilterBar';
@@ -6,6 +6,9 @@ import PropertyCard from '../components/PropertyCard';
 import PresetManager from '../components/PresetManager';
 import { useOpportunities, useClassifications, useFavoriteIds, usePropertiesByEvent, useWhitelistIds, useBlacklistIds, usePropertySearch } from '../api/queries';
 import { useAddFavorite, useRemoveFavorite, useWhitelist, useRemoveWhitelist, useBlacklist, useRemoveBlacklist } from '../api/mutations';
+
+// Golden neighborhoods — premium TLV neighborhoods for rent opportunities
+const GOLDEN_PATTERNS = ['פלורנטין', 'נווה צדק', 'הצפון הישן', 'הצפון החדש', 'לב תל אביב', 'כרם התימנים'];
 
 type Tab = 'opportunities' | 'fullscan';
 
@@ -17,7 +20,9 @@ function applyFilters(
   source: string,
   sortBy: string,
   tab: Tab,
-  keyword: string
+  keyword: string,
+  minPriceSqm: string,
+  maxPriceSqm: string
 ): Record<string, unknown>[] {
   let result = [...items];
 
@@ -50,12 +55,32 @@ function applyFilters(
     });
   }
 
+  // Price per sqm filter
+  const minPSqm = minPriceSqm !== '' ? Number(minPriceSqm) : null;
+  const maxPSqm = maxPriceSqm !== '' ? Number(maxPriceSqm) : null;
+  if (minPSqm !== null || maxPSqm !== null) {
+    result = result.filter(i => {
+      const price = i.price as number | null;
+      const sqm = (i.square_meter_build as number | null) || (i.square_meters as number | null);
+      if (!price || !sqm || sqm === 0) return false;
+      const priceSqm = price / sqm;
+      if (minPSqm !== null && priceSqm < minPSqm) return false;
+      if (maxPSqm !== null && priceSqm > maxPSqm) return false;
+      return true;
+    });
+  }
+
   result.sort((a, b) => {
     if (sortBy === 'price') {
       return ((a.price as number) ?? 0) - ((b.price as number) ?? 0);
     }
     if (sortBy === 'days_on_market') {
       return ((b.days_on_market as number) ?? 0) - ((a.days_on_market as number) ?? 0);
+    }
+    if (sortBy === 'price_sqm') {
+      const aPsqm = ((a.price as number) ?? 0) / (((a.square_meter_build as number) || (a.square_meters as number)) || 1);
+      const bPsqm = ((b.price as number) ?? 0) / (((b.square_meter_build as number) || (b.square_meters as number)) || 1);
+      return aPsqm - bPsqm;
     }
     // default: by classification (hot > warm > cold), then updated_at
     const classOrder: Record<string, number> = { hot: 0, warm: 1, cold: 2 };
@@ -80,18 +105,22 @@ interface OpportunityPageProps {
 export default function OpportunityPage({ category }: OpportunityPageProps) {
   const title = category === 'rent' ? 'Rental Hunter' : 'Purchase Hunter';
 
-  const [tab, setTab] = useState<Tab>('opportunities');
-  const [neighborhoods, setNeighborhoods] = useState<string[]>([]);
-  const [selectedRooms, setSelectedRooms] = useState<string[]>([]);
-  const [classification, setClassification] = useState('');
-  const [source, setSource] = useState('');
-  const [sortBy, setSortBy] = useState('signals');
   const [searchParams, setSearchParams] = useSearchParams();
+
+  // Restore filter state from URL params
+  const [tab, setTab] = useState<Tab>((searchParams.get('tab') as Tab) || 'opportunities');
+  const [neighborhoods, setNeighborhoods] = useState<string[]>(searchParams.get('neighborhoods') ? searchParams.get('neighborhoods')!.split(',') : []);
+  const [selectedRooms, setSelectedRooms] = useState<string[]>(searchParams.get('rooms') ? searchParams.get('rooms')!.split(',') : []);
+  const [classification, setClassification] = useState(searchParams.get('classification') || '');
+  const [source, setSource] = useState(searchParams.get('source') || '');
+  const [sortBy, setSortBy] = useState(searchParams.get('sortBy') || 'signals');
+  const [minPriceSqm, setMinPriceSqm] = useState(searchParams.get('minPriceSqm') || '');
+  const [maxPriceSqm, setMaxPriceSqm] = useState(searchParams.get('maxPriceSqm') || '');
   const [keyword, setKeyword] = useState(searchParams.get('keyword') || '');
   const [debouncedKeyword, setDebouncedKeyword] = useState(searchParams.get('keyword') || '');
   const [showMenu, setShowMenu] = useState(false);
   const [showPresets, setShowPresets] = useState(false);
-  const [activeStatFilter, setActiveStatFilter] = useState<string | null>(null);
+  const [activeStatFilter, setActiveStatFilter] = useState<string | null>(searchParams.get('statFilter') || null);
   const [searchAllQuery, setSearchAllQuery] = useState('');
 
   useEffect(() => {
@@ -99,15 +128,21 @@ export default function OpportunityPage({ category }: OpportunityPageProps) {
     return () => clearTimeout(timer);
   }, [keyword]);
 
+  // Sync all filters to URL params
   useEffect(() => {
-    const params = new URLSearchParams(searchParams);
-    if (debouncedKeyword) {
-      params.set('keyword', debouncedKeyword);
-    } else {
-      params.delete('keyword');
-    }
+    const params = new URLSearchParams();
+    if (debouncedKeyword) params.set('keyword', debouncedKeyword);
+    if (tab !== 'opportunities') params.set('tab', tab);
+    if (neighborhoods.length > 0) params.set('neighborhoods', neighborhoods.join(','));
+    if (selectedRooms.length > 0) params.set('rooms', selectedRooms.join(','));
+    if (classification) params.set('classification', classification);
+    if (source) params.set('source', source);
+    if (sortBy && sortBy !== 'signals') params.set('sortBy', sortBy);
+    if (minPriceSqm) params.set('minPriceSqm', minPriceSqm);
+    if (maxPriceSqm) params.set('maxPriceSqm', maxPriceSqm);
+    if (activeStatFilter) params.set('statFilter', activeStatFilter);
     setSearchParams(params, { replace: true });
-  }, [debouncedKeyword]);
+  }, [debouncedKeyword, tab, neighborhoods, selectedRooms, classification, source, sortBy, minPriceSqm, maxPriceSqm, activeStatFilter]);
 
   const { data: oppsData, isLoading: oppsLoading } = useOpportunities(category);
   const { data: classData, isLoading: classLoading } = useClassifications(category);
@@ -145,11 +180,13 @@ export default function OpportunityPage({ category }: OpportunityPageProps) {
     setKeyword('');
     setDebouncedKeyword('');
     setSearchAllQuery('');
-    setSearchParams({}, { replace: true });
     setNeighborhoods([]);
     setSelectedRooms([]);
     setSource('');
     setClassification('');
+    setMinPriceSqm('');
+    setMaxPriceSqm('');
+    setSortBy('signals');
     if (stat === 'opportunities') {
       setTab('opportunities');
       setActiveStatFilter(null);
@@ -173,9 +210,29 @@ export default function OpportunityPage({ category }: OpportunityPageProps) {
     return (classData?.classifications ?? []) as Record<string, unknown>[];
   }, [tab, oppsData, classData, activeStatFilter, eventPropsData]);
 
+  // Auto-select golden neighborhoods for rent opportunities (once, on initial load only)
+  const hasAppliedDefaults = useRef(false);
+  useEffect(() => {
+    if (
+      !hasAppliedDefaults.current &&
+      category === 'rent' &&
+      tab === 'opportunities' &&
+      !activeStatFilter &&
+      !searchParams.get('neighborhoods') &&
+      rawItems.length > 0
+    ) {
+      const allNeighborhoods = [...new Set(rawItems.map(i => i.neighborhood as string).filter(Boolean))];
+      const golden = allNeighborhoods.filter(n => GOLDEN_PATTERNS.some(p => n.includes(p)));
+      if (golden.length > 0) {
+        setNeighborhoods(golden);
+        hasAppliedDefaults.current = true;
+      }
+    }
+  }, [rawItems, category, tab, activeStatFilter]);
+
   const filtered = useMemo(
-    () => applyFilters(rawItems, neighborhoods, selectedRooms, classification, source, sortBy, tab, debouncedKeyword),
-    [rawItems, neighborhoods, selectedRooms, classification, source, sortBy, tab, debouncedKeyword]
+    () => applyFilters(rawItems, neighborhoods, selectedRooms, classification, source, sortBy, tab, debouncedKeyword, minPriceSqm, maxPriceSqm),
+    [rawItems, neighborhoods, selectedRooms, classification, source, sortBy, tab, debouncedKeyword, minPriceSqm, maxPriceSqm]
   );
 
   const isLoading = activeStatFilter && activeStatFilter !== 'opportunities'
@@ -223,6 +280,10 @@ export default function OpportunityPage({ category }: OpportunityPageProps) {
         showClassificationFilter={tab === 'fullscan' && !activeStatFilter}
         keyword={keyword}
         setKeyword={setKeyword}
+        minPriceSqm={minPriceSqm}
+        maxPriceSqm={maxPriceSqm}
+        onMinPriceSqmChange={setMinPriceSqm}
+        onMaxPriceSqmChange={setMaxPriceSqm}
       />
 
       {activeStatFilter && activeStatFilter !== 'opportunities' && activeStatFilter !== 'fullscan' && (

@@ -8,9 +8,11 @@ import time as _time
 
 import structlog
 
+import asyncio
+
 import pdis.database as _db
 from pdis.models import ScrapedListing, ScrapeResult
-from pdis.scraper import scrape_preset
+from pdis.scraper import scrape_preset, fetch_item_detail
 from pdis.scraper_madlan import scrape_madlan_preset
 
 logger = structlog.get_logger(__name__)
@@ -73,7 +75,7 @@ async def _upsert_properties(
                         yad2_id, preset_id, category,
                         address_street, address_city, neighborhood,
                         address_home_number,
-                        rooms, floor, total_floors, square_meters,
+                        rooms, floor, total_floors, square_meters, square_meter_build,
                         price, currency, property_type,
                         description, contact_name, contact_phone,
                         image_urls, listing_url, raw_data,
@@ -87,7 +89,7 @@ async def _upsert_properties(
                         %(yad2_id)s, %(preset_id)s, %(category)s,
                         %(address_street)s, %(address_city)s, %(neighborhood)s,
                         %(address_home_number)s,
-                        %(rooms)s, %(floor)s, %(total_floors)s, %(square_meters)s,
+                        %(rooms)s, %(floor)s, %(total_floors)s, %(square_meters)s, %(square_meter_build)s,
                         %(price)s, %(currency)s, %(property_type)s,
                         %(description)s, %(contact_name)s, %(contact_phone)s,
                         %(image_urls)s, %(listing_url)s, %(raw_data)s::jsonb,
@@ -110,6 +112,7 @@ async def _upsert_properties(
                         rooms           = EXCLUDED.rooms,
                         floor           = EXCLUDED.floor,
                         square_meters   = EXCLUDED.square_meters,
+                        square_meter_build = COALESCE(EXCLUDED.square_meter_build, properties.square_meter_build),
                         property_type   = EXCLUDED.property_type,
                         last_seen       = CURRENT_DATE,
                         yad2_date_added = COALESCE(EXCLUDED.yad2_date_added, properties.yad2_date_added),
@@ -152,6 +155,7 @@ async def _upsert_properties(
                         "floor": listing.floor,
                         "total_floors": listing.total_floors,
                         "square_meters": listing.square_meters,
+                        "square_meter_build": listing.square_meter_build,
                         "price": listing.price,
                         "currency": listing.currency,
                         "property_type": listing.property_type,
@@ -330,6 +334,47 @@ async def _record_preset_stats(preset_id: int, session_id: int) -> None:
         await conn.commit()
 
 
+async def _backfill_built_sqm(listings: list[ScrapedListing], log) -> None:
+    """Fetch square_meter_build from Yad2 detail API for properties missing it."""
+    # Find yad2_ids that don't have square_meter_build yet
+    yad2_ids = [l.yad2_id for l in listings if l.source == "yad2"]
+    if not yad2_ids:
+        return
+
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """SELECT yad2_id FROM properties
+                   WHERE yad2_id = ANY(%s) AND square_meter_build IS NULL""",
+                (yad2_ids,),
+            )
+            missing = [r["yad2_id"] for r in await cur.fetchall()]
+
+    if not missing:
+        return
+
+    log.info("scanner.fetching_built_sqm", count=len(missing))
+    updated = 0
+    for yad2_id in missing:
+        detail = await asyncio.to_thread(fetch_item_detail, yad2_id)
+        if detail and detail.get("square_meter_build") is not None:
+            try:
+                build_sqm = int(detail["square_meter_build"])
+                async with _db.pool.connection() as conn:
+                    async with conn.cursor() as cur:
+                        await cur.execute(
+                            "UPDATE properties SET square_meter_build = %s WHERE yad2_id = %s",
+                            (build_sqm, yad2_id),
+                        )
+                    await conn.commit()
+                updated += 1
+            except (ValueError, TypeError):
+                pass
+        await asyncio.sleep(0.3)  # rate limit
+
+    log.info("scanner.built_sqm_filled", updated=updated, total=len(missing))
+
+
 async def run_scan(preset_id: int) -> dict:
     """
     Run a full scan for a single preset.
@@ -389,6 +434,10 @@ async def run_scan(preset_id: int) -> dict:
             new=new_count,
             blocked=result.was_blocked,
         )
+
+        # Fetch square_meter_build from detail API for properties that don't have it
+        if _source == "yad2":
+            await _backfill_built_sqm(result.listings, log)
 
         from pdis.events import detect_events
         from pdis.classification import classify_batch

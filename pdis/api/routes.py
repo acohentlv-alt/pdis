@@ -121,7 +121,7 @@ async def create_preset(request: Request):
     # Advanced filter params stored in extra_params JSONB
     for key in ["min_sqm", "max_sqm", "min_floor", "max_floor", "enter_date",
                 "img_only", "parking", "elevator", "air_conditioning", "balcony",
-                "pets", "furniture", "mamad", "accessible"]:
+                "pets", "furniture", "mamad", "accessible", "property_condition"]:
         val = body.get(key)
         if val is not None:
             extra_params[key] = val
@@ -173,7 +173,7 @@ async def update_preset(preset_id: int, request: Request):
     # Advanced filter params stored in extra_params JSONB
     for key in ["min_sqm", "max_sqm", "min_floor", "max_floor", "enter_date",
                 "img_only", "parking", "elevator", "air_conditioning", "balcony",
-                "pets", "furniture", "mamad", "accessible"]:
+                "pets", "furniture", "mamad", "accessible", "property_condition"]:
         val = body.get(key)
         if val is not None:
             extra_params[key] = val
@@ -1149,6 +1149,50 @@ async def get_blacklist_ids():
             )
             rows = await cur.fetchall()
     return {"ids": [r["yad2_id"] for r in rows]}
+
+
+@router.get("/api/whitelist")
+async def list_whitelist():
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("""
+                SELECT p.*, pc.classification, pc.distress_score, pc.signal_details,
+                       (SELECT ARRAY_AGG(DISTINCT p2.source)
+                        FROM property_matches pm
+                        JOIN properties p2 ON p2.id = CASE
+                            WHEN pm.property_id_a = p.id THEN pm.property_id_b
+                            ELSE pm.property_id_a END
+                        WHERE pm.property_id_a = p.id OR pm.property_id_b = p.id
+                       ) AS matched_sources
+                FROM whitelist w
+                JOIN properties p ON p.id = w.property_id
+                LEFT JOIN property_classifications pc ON pc.property_id = p.id
+                ORDER BY w.created_at DESC
+            """)
+            rows = await cur.fetchall()
+    return {"total": len(rows), "properties": [dict(r) for r in rows]}
+
+
+@router.get("/api/blacklist")
+async def list_blacklist():
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("""
+                SELECT p.*, pc.classification, pc.distress_score, pc.signal_details,
+                       (SELECT ARRAY_AGG(DISTINCT p2.source)
+                        FROM property_matches pm
+                        JOIN properties p2 ON p2.id = CASE
+                            WHEN pm.property_id_a = p.id THEN pm.property_id_b
+                            ELSE pm.property_id_a END
+                        WHERE pm.property_id_a = p.id OR pm.property_id_b = p.id
+                       ) AS matched_sources
+                FROM blacklist b
+                JOIN properties p ON p.id = b.property_id
+                LEFT JOIN property_classifications pc ON pc.property_id = p.id
+                ORDER BY b.created_at DESC
+            """)
+            rows = await cur.fetchall()
+    return {"total": len(rows), "properties": [dict(r) for r in rows]}
 
 
 class ListReason(BaseModel):

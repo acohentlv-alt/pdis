@@ -30,6 +30,9 @@
 
 ## NOT STARTED
 
+### Fix Save/favorite button on property detail page
+**What:** The "Save" button on the property detail page doesn't turn yellow when the property is favorited. It should show a filled yellow star (⭐) when the property is in favorites, matching the behavior on property cards.
+
 ### Create buy presets for Haifa
 **What:** Create forsale presets in PresetManager for Haifa. Need to find Haifa's Yad2 city code. Run a scan to populate buy data on the /buy page.
 

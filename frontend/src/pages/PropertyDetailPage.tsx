@@ -2,26 +2,12 @@ import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useProperty, useSignals, useEvents, useOperatorInput, useMatches } from '../api/queries';
 import { useWhitelist, useRemoveWhitelist, useBlacklist, useRemoveBlacklist, useAddFavorite, useRemoveFavorite } from '../api/mutations';
-import { formatPrice, formatPricePerSqm, formatDate, formatDateFull, CLASSIFICATION_STYLES } from '../lib/format';
+import { formatPrice, formatPricePerSqm, formatDate, formatDateFull, CLASSIFICATION_STYLES, SIGNAL_LABELS } from '../lib/format';
 import LifecycleTimeline from '../components/LifecycleTimeline';
 import ImageViewer from '../components/ImageViewer';
 import OperatorInputForm from '../components/OperatorInputForm';
 import NotesList from '../components/NotesList';
 
-const SIGNAL_LABELS: Record<string, string> = {
-  price_drop_gt_10pct: "Large price drop (>10%)",
-  relisted_2plus: "Relisted 2+ times",
-  listed_90plus_days: "Listed 90+ days",
-  weak_language: "Desperate language detected",
-  condition_keywords: "Needs renovation",
-  below_avg_price: "Below neighborhood average price/sqm",
-  price_drop_small: "Price drop (≤10%)",
-  relisted_once: "Relisted once",
-  listed_30_60_days: "Listed 30-60 days",
-  desc_changes: "Description changed",
-  img_changes: "Images changed",
-  move_in_urgent: "Urgent move-in date",
-};
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -93,7 +79,9 @@ export default function PropertyDetailPage() {
   const style = CLASSIFICATION_STYLES[cls] ?? CLASSIFICATION_STYLES.cold;
 
   const price = prop.price as number | null;
-  const sqm = prop.square_meters as number | null;
+  const sqmBuild = prop.square_meter_build as number | null;
+  const sqmTotal = prop.square_meters as number | null;
+  const sqm = sqmBuild || sqmTotal;
   const dom = (prop.days_on_market as number) ?? 0;
 
   // Signal details — support both new tier-based and old shapes
@@ -145,6 +133,13 @@ export default function PropertyDetailPage() {
   const agentOffice = prop.agent_office as string | null;
   const moveInDate = prop.move_in_date as string | null;
   const source = (prop.source as string) ?? 'yad2';
+
+  // Build source URL: use listing_url if available, otherwise construct from yad2_id
+  const sourceUrl = (prop.listing_url as string) || (
+    source === 'yad2' ? `https://www.yad2.co.il/item/${yad2Id}` :
+    source === 'madlan' ? `https://www.madlan.co.il/listings/${(yad2Id ?? '').replace('madlan_', '')}` :
+    null
+  );
 
   const amenities = [
     { key: 'parking', label: 'Parking', active: !!(prop.parking) },
@@ -216,14 +211,24 @@ export default function PropertyDetailPage() {
             <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">
               {source === 'yad2' ? 'Yad2' : source}
             </span>
-            <span className={`${style.bg} text-white text-xs px-2 py-0.5 rounded-full font-medium`}>
+            <span
+              className={`${style.bg} text-white text-xs px-2 py-0.5 rounded-full font-medium cursor-help`}
+              title={
+                strongSignals.length > 0 || weakSignals.length > 0
+                  ? [
+                      ...(strongSignals.length > 0 ? [`Strong: ${strongSignals.map(s => SIGNAL_LABELS[s] ?? s).join(', ')}`] : []),
+                      ...(weakSignals.length > 0 ? [`Weak: ${weakSignals.map(s => SIGNAL_LABELS[s] ?? s).join(', ')}`] : []),
+                    ].join('\n')
+                  : cls === 'cold' ? 'No distress signals detected' : ''
+              }
+            >
               {style.icon} {style.label}
             </span>
           </div>
         </div>
         <div className="text-2xl font-bold text-gray-900">{formatPrice(price)}</div>
         <div className="text-sm text-gray-500 flex gap-3">
-          {sqm && <span>{sqm}m²</span>}
+          {sqm && <span>{sqm}m²{sqmBuild && sqmTotal && sqmBuild !== sqmTotal ? ` (${sqmTotal} total)` : ''}</span>}
           <span>{formatPricePerSqm(price, sqm)}</span>
         </div>
       </div>
@@ -460,12 +465,12 @@ export default function PropertyDetailPage() {
             {isBlacklisted ? '✗ Blacklisted' : 'Blacklist'}
           </button>
         </div>
-        {!!prop.listing_url && (
+        {sourceUrl && (
           <button
-            onClick={() => window.open(prop.listing_url as string, '_blank')}
+            onClick={() => window.open(sourceUrl, '_blank')}
             className="w-full min-h-[44px] bg-gray-900 text-white rounded-lg text-sm font-medium"
           >
-            Open Source →
+            View on {source === 'madlan' ? 'Madlan' : 'Yad2'} →
           </button>
         )}
       </div>

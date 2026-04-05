@@ -140,6 +140,20 @@ export function useBlacklistIds() {
   });
 }
 
+export function useWhitelistProperties() {
+  return useQuery({
+    queryKey: ['whitelistProperties'],
+    queryFn: () => apiFetch<{ total: number; properties: Record<string, unknown>[] }>('/api/whitelist'),
+  });
+}
+
+export function useBlacklistProperties() {
+  return useQuery({
+    queryKey: ['blacklistProperties'],
+    queryFn: () => apiFetch<{ total: number; properties: Record<string, unknown>[] }>('/api/blacklist'),
+  });
+}
+
 export function usePropertySearch(query: string, category?: string) {
   const params = new URLSearchParams({ q: query });
   if (category) params.set('category', category);

@@ -42,6 +42,7 @@ interface PresetFormData {
   furniture: boolean;
   mamad: boolean;
   accessible: boolean;
+  property_condition: string;
 }
 
 const PROPERTY_TYPE_OPTIONS = [
@@ -83,6 +84,7 @@ const emptyForm = (): PresetFormData => ({
   furniture: false,
   mamad: false,
   accessible: false,
+  property_condition: '',
 });
 
 function validate(form: PresetFormData): string | null {
@@ -127,6 +129,7 @@ function formToPayload(form: PresetFormData): Record<string, unknown> {
     furniture: form.furniture || null,
     mamad: form.mamad || null,
     accessible: form.accessible || null,
+    property_condition: form.property_condition || null,
   };
 }
 
@@ -166,6 +169,7 @@ function presetToForm(preset: Record<string, unknown>): PresetFormData {
     furniture: Boolean(extra.furniture),
     mamad: Boolean(extra.mamad),
     accessible: Boolean(extra.accessible),
+    property_condition: (extra.property_condition as string) ?? '',
   };
 }
 
@@ -462,6 +466,20 @@ export default function PresetManager({ open, onClose, category }: PresetManager
                 />
                 Photos only
               </label>
+            </div>
+
+            {/* Property condition */}
+            <div>
+              <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Property Condition</div>
+              <select className={inputCls} value={form.property_condition} onChange={e => setField('property_condition', e.target.value)}>
+                <option value="">Any condition</option>
+                <option value="1">New from contractor</option>
+                <option value="2">New</option>
+                <option value="3">Renovated</option>
+                <option value="4">Well maintained</option>
+                <option value="5">Needs renovation</option>
+                <option value="6">For preservation</option>
+              </select>
             </div>
           </div>
         )}

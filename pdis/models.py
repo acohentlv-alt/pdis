@@ -12,6 +12,7 @@ class ScrapedListing:
     floor: int | None
     total_floors: int | None
     square_meters: int | None
+    square_meter_build: int | None
     price: int | None
     currency: str
     property_type: str | None

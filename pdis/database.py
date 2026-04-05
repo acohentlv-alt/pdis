@@ -352,13 +352,10 @@ async def run_migrations() -> None:
                 WHERE address_home_number IS NULL AND raw_data->>'address_home_number' IS NOT NULL
             """)
 
-            # Seed Madlan preset if not exists
-            await cur.execute("""
-                INSERT INTO search_presets (name, category, city_code, min_price, max_price, min_rooms, max_rooms, extra_params, is_active)
-                SELECT 'Madlan TLV Rental', 'rent', 'madlan', 3000, 15000, 1.0, 5.0,
-                       '{"source": "madlan", "madlan_city": "תל אביב יפו"}'::jsonb, TRUE
-                WHERE NOT EXISTS (SELECT 1 FROM search_presets WHERE name = 'Madlan TLV Rental')
-            """)
+            # Add square_meter_build column — actual indoor area (vs total including balcony/roof)
+            await cur.execute(
+                "ALTER TABLE properties ADD COLUMN IF NOT EXISTS square_meter_build INTEGER"
+            )
 
         await conn.commit()
     logger.info("db.migrations_done")
@@ -376,31 +373,34 @@ async def seed_presets() -> None:
 
             presets = [
                 {
-                    "name": "Florentin Rental",
+                    "name": "TLV Rent - Golden",
                     "category": "rent",
                     "city_code": "5000",
-                    "min_price": 3000,
-                    "max_price": 8000,
-                    "min_rooms": 1.0,
-                    "max_rooms": 4.0,
+                    "neighborhood": "848,205,1483,1461,204,1519,1516,1520,1521",
+                    "min_price": None,
+                    "max_price": None,
+                    "min_rooms": None,
+                    "max_rooms": None,
                 },
                 {
-                    "name": "Neve Tzedek Rental",
+                    "name": "TLV Rent - Full Scan",
                     "category": "rent",
                     "city_code": "5000",
-                    "min_price": 5000,
-                    "max_price": 15000,
-                    "min_rooms": 1.0,
-                    "max_rooms": 5.0,
+                    "neighborhood": None,
+                    "min_price": None,
+                    "max_price": None,
+                    "min_rooms": None,
+                    "max_rooms": None,
                 },
                 {
-                    "name": "Lev Ha'ir Rental",
-                    "category": "rent",
-                    "city_code": "5000",
-                    "min_price": 4000,
-                    "max_price": 12000,
-                    "min_rooms": 1.0,
-                    "max_rooms": 4.0,
+                    "name": "Haifa Buy",
+                    "category": "forsale",
+                    "city_code": "4000",
+                    "neighborhood": None,
+                    "min_price": None,
+                    "max_price": None,
+                    "min_rooms": None,
+                    "max_rooms": None,
                 },
             ]
 
@@ -408,9 +408,9 @@ async def seed_presets() -> None:
                 await cur.execute(
                     """
                     INSERT INTO search_presets
-                        (name, category, city_code, min_price, max_price, min_rooms, max_rooms)
+                        (name, category, city_code, neighborhood, min_price, max_price, min_rooms, max_rooms)
                     VALUES
-                        (%(name)s, %(category)s, %(city_code)s,
+                        (%(name)s, %(category)s, %(city_code)s, %(neighborhood)s,
                          %(min_price)s, %(max_price)s, %(min_rooms)s, %(max_rooms)s)
                     """,
                     p,

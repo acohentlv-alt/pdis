@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { formatPrice, formatPricePerSqm, CLASSIFICATION_STYLES } from '../lib/format';
+import { formatPrice, formatPricePerSqm, CLASSIFICATION_STYLES, SIGNAL_LABELS } from '../lib/format';
 import ImageViewer from './ImageViewer';
 
 interface PropertyCardProps {
@@ -36,7 +36,9 @@ export default function PropertyCard({
   const sd = getSignalDetails(item);
 
   const price = item.price as number | null;
-  const sqm = item.square_meters as number | null;
+  const sqmBuild = item.square_meter_build as number | null;
+  const sqmTotal = item.square_meters as number | null;
+  const sqm = sqmBuild || sqmTotal;
   const dom = (item.days_on_market as number) ?? 0;
   const neighborhood = item.neighborhood as string | null;
 
@@ -53,7 +55,6 @@ export default function PropertyCard({
   const weakLanguage = Array.isArray(sd.weak_language_found) && (sd.weak_language_found as unknown[]).length > 0;
   const conditionAlert = Array.isArray(sd.condition_keywords_found) && (sd.condition_keywords_found as unknown[]).length > 0;
   const belowAvgPrice = !!(sd.below_avg_price_sqm);
-  const moveInUrgent = !!(sd.move_in_urgency);
 
   const imageUrls = (item.image_urls as string[] | null) ?? [];
   const isAgent = !!(item.is_agent);
@@ -64,6 +65,13 @@ export default function PropertyCard({
   const source = (item.source as string) ?? 'yad2';
   const matchedSources = (item.matched_sources as string[] | null) ?? [];
   const allSources = new Set([source, ...matchedSources]);
+
+  // Build source URL: use listing_url if available, otherwise construct from yad2_id
+  const sourceUrl = (item.listing_url as string) || (
+    source === 'yad2' ? `https://www.yad2.co.il/item/${yad2Id}` :
+    source === 'madlan' ? `https://www.madlan.co.il/listings/${yad2Id.replace('madlan_', '')}` :
+    null
+  );
 
   const isFav = favoriteIds?.has(yad2Id) ?? false;
 
@@ -135,7 +143,17 @@ export default function PropertyCard({
           {allSources.has('madlan') && (
             <span className="text-xs bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded">MD</span>
           )}
-          <span className={`${style.bg} text-white text-xs px-2 py-0.5 rounded-full font-medium`}>
+          <span
+            className={`${style.bg} text-white text-xs px-2 py-0.5 rounded-full font-medium cursor-help`}
+            title={
+              strongSignals.length > 0 || weakSignals.length > 0
+                ? [
+                    ...(strongSignals.length > 0 ? [`Strong: ${strongSignals.map(s => SIGNAL_LABELS[s] ?? s).join(', ')}`] : []),
+                    ...(weakSignals.length > 0 ? [`Weak: ${weakSignals.map(s => SIGNAL_LABELS[s] ?? s).join(', ')}`] : []),
+                  ].join('\n')
+                : classification === 'cold' ? 'No distress signals detected' : ''
+            }
+          >
             {style.icon} {style.label}
           </span>
         </div>
@@ -143,7 +161,7 @@ export default function PropertyCard({
 
       <div className="text-sm text-gray-700">
         <span className="font-semibold">{formatPrice(price)}</span>
-        {sqm && <span className="text-gray-400 ml-2">· {sqm}m²</span>}
+        {sqm && <span className="text-gray-400 ml-2">· {sqm}m²{sqmBuild && sqmTotal && sqmBuild !== sqmTotal ? ` (${sqmTotal} total)` : ''}</span>}
         {price && sqm && <span className="text-gray-400 ml-2">· {formatPricePerSqm(price, sqm)}</span>}
       </div>
 
@@ -158,7 +176,10 @@ export default function PropertyCard({
           <span className="text-xs bg-purple-50 text-purple-600 px-2 py-0.5 rounded-full">Agent</span>
         )}
         {priceDrop && (
-          <span className="text-xs bg-red-50 text-red-600 px-2 py-0.5 rounded-full">📉 Price drop</span>
+          <span
+            className="text-xs bg-red-50 text-red-600 px-2 py-0.5 rounded-full cursor-help"
+            title={`${sd.price_drops}x drop, largest ${Number(sd.largest_drop_pct || 0).toFixed(1)}%${sd.last_price_drop_date ? `\nLast: ${String(sd.last_price_drop_date)}` : ''}`}
+          >📉 Price drop</span>
         )}
         {hasRelisting && (
           <span className="text-xs bg-orange-50 text-orange-600 px-2 py-0.5 rounded-full">🔴 Reappeared</span>
@@ -174,9 +195,6 @@ export default function PropertyCard({
         )}
         {belowAvgPrice && (
           <span className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full">↓ Below avg</span>
-        )}
-        {moveInUrgent && (
-          <span className="text-xs bg-red-50 text-red-600 px-2 py-0.5 rounded-full">🚨 Urgent move-in</span>
         )}
       </div>
 
@@ -195,12 +213,12 @@ export default function PropertyCard({
         >
           Open Card
         </button>
-        {!!item.listing_url && (
+        {sourceUrl && (
           <button
-            onClick={() => window.open(item.listing_url as string, '_blank')}
+            onClick={() => window.open(sourceUrl, '_blank')}
             className="flex-1 min-h-[44px] border border-gray-300 text-gray-700 rounded-lg text-sm font-medium"
           >
-            Source →
+            View on {source === 'madlan' ? 'Madlan' : 'Yad2'} →
           </button>
         )}
       </div>

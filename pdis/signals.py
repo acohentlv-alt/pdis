@@ -32,23 +32,41 @@ async def compute_signals_batch(property_ids: list[int]) -> dict[int, dict]:
             # BATCH QUERY 2: Property metadata
             await cur.execute(
                 """SELECT id, days_on_market, price, description,
-                          move_in_date, square_meters, neighborhood, is_agent, renovated
+                          move_in_date, square_meters, neighborhood, is_agent, renovated, category
                    FROM properties
                    WHERE id = ANY(%s)""",
                 (property_ids,),
             )
             prop_rows = await cur.fetchall()
 
-            # BATCH QUERY 3: Neighborhood avg price per sqm
-            await cur.execute("""
-                SELECT neighborhood,
-                       AVG(price / NULLIF(square_meters, 0)) as avg_price_sqm,
-                       COUNT(*) as cnt
-                FROM properties
-                WHERE price > 0 AND square_meters > 0 AND neighborhood IS NOT NULL AND is_active = TRUE
-                GROUP BY neighborhood
-                HAVING COUNT(*) >= 5
-            """)
+            # Determine category from the batch (all props in a scan share a category)
+            batch_categories = set(r["category"] for r in prop_rows if r.get("category"))
+            batch_category = batch_categories.pop() if len(batch_categories) == 1 else None
+
+            # BATCH QUERY 3: Neighborhood avg price per sqm (filtered by category)
+            if batch_category:
+                await cur.execute("""
+                    SELECT neighborhood,
+                           AVG(price / NULLIF(COALESCE(square_meter_build, square_meters), 0)) as avg_price_sqm,
+                           COUNT(*) as cnt
+                    FROM properties
+                    WHERE price > 0 AND COALESCE(square_meter_build, square_meters) > 0
+                          AND neighborhood IS NOT NULL
+                          AND is_active = TRUE AND category = %s
+                    GROUP BY neighborhood
+                    HAVING COUNT(*) >= 5
+                """, (batch_category,))
+            else:
+                await cur.execute("""
+                    SELECT neighborhood,
+                           AVG(price / NULLIF(COALESCE(square_meter_build, square_meters), 0)) as avg_price_sqm,
+                           COUNT(*) as cnt
+                    FROM properties
+                    WHERE price > 0 AND COALESCE(square_meter_build, square_meters) > 0
+                          AND neighborhood IS NOT NULL AND is_active = TRUE
+                    GROUP BY neighborhood
+                    HAVING COUNT(*) >= 5
+                """)
             hood_avg_rows = await cur.fetchall()
             hood_avgs = {r["neighborhood"]: float(r["avg_price_sqm"]) for r in hood_avg_rows}
 
@@ -107,16 +125,19 @@ def _compute_single(pid: int, events: list[dict], prop: dict, hood_avgs: dict) -
         "weak_language_found": [],
         "condition_keywords_found": [],
         "below_avg_price_sqm": False,
-        "move_in_urgency": False,
         "neighborhood_avg_price_sqm": None,
         "property_price_sqm": None,
     }
 
     # Count events
+    last_drop_date = None
     for ev in events:
         etype = ev["event_type"]
         if etype == "price_drop":
             details["price_drops"] += 1
+            ev_date = str(ev.get("created_at") or "")[:10]
+            if ev_date:
+                last_drop_date = ev_date
             try:
                 old_p = int(ev["old_value"])
                 new_p = int(ev["new_value"])
@@ -131,6 +152,9 @@ def _compute_single(pid: int, events: list[dict], prop: dict, hood_avgs: dict) -
             details["desc_changes"] += 1
         elif etype == "image_change":
             details["img_changes"] += 1
+
+    if last_drop_date:
+        details["last_price_drop_date"] = last_drop_date
 
     # Days on market
     dom = prop.get("days_on_market") or 0
@@ -149,9 +173,9 @@ def _compute_single(pid: int, events: list[dict], prop: dict, hood_avgs: dict) -
     if prop.get("renovated"):
         details["condition_keywords_found"] = []
 
-    # Price/sqm vs neighborhood average
+    # Price/sqm vs neighborhood average — use built sqm (actual indoor area) when available
     price = prop.get("price") or 0
-    sqm = prop.get("square_meters") or 0
+    sqm = prop.get("square_meter_build") or prop.get("square_meters") or 0
     neighborhood = prop.get("neighborhood")
     if price > 0 and sqm > 0 and neighborhood and neighborhood in hood_avgs:
         prop_price_sqm = price / sqm
@@ -160,19 +184,6 @@ def _compute_single(pid: int, events: list[dict], prop: dict, hood_avgs: dict) -
         details["neighborhood_avg_price_sqm"] = round(avg_price_sqm, 1)
         if prop_price_sqm < avg_price_sqm * 0.8:  # 20%+ below average
             details["below_avg_price_sqm"] = True
-
-    # Move-in date urgency — only if date is in the PAST (unit sitting empty)
-    move_in = prop.get("move_in_date")
-    if move_in:
-        if isinstance(move_in, str):
-            try:
-                move_in = date.fromisoformat(move_in)
-            except ValueError:
-                move_in = None
-        if move_in and isinstance(move_in, date):
-            today = date.today()
-            if move_in < today:
-                details["move_in_urgency"] = True
 
     # === CLASSIFY SIGNALS INTO TIERS ===
 
@@ -201,8 +212,6 @@ def _compute_single(pid: int, events: list[dict], prop: dict, hood_avgs: dict) -
         weak_signals.append("desc_changes")
     if details["img_changes"] > 0:
         weak_signals.append("img_changes")
-    if details["move_in_urgency"]:
-        weak_signals.append("move_in_urgent")
 
     return {
         "distress_score": 0.0,  # kept for DB compat, no longer used

@@ -184,6 +184,7 @@ def _parse_listing(item: dict, category: str = "rent") -> ScrapedListing | None:
         floor=floor,
         total_floors=None,  # API does not provide total_floors directly
         square_meters=square_meters,
+        square_meter_build=None,  # only available from detail API, filled in by scanner
         price=price,
         currency=currency,
         property_type=property_type,
@@ -274,6 +275,9 @@ def _build_params(preset: dict, page: int = 1) -> dict:
 
     if extra.get("renovated"):
         params["Meshupatz"] = "1"
+
+    if extra.get("property_condition"):
+        params["propertyCondition"] = extra["property_condition"]
 
     return params
 
@@ -404,3 +408,23 @@ async def scrape_preset(preset: dict) -> ScrapeResult:
         errors=errors,
         duration_seconds=round(duration, 2),
     )
+
+
+def fetch_item_detail(yad2_id: str) -> dict | None:
+    """Fetch detail for a single Yad2 listing. Returns dict with square_meter_build etc."""
+    url = f"{YAD2_BASE_URL}/api/item/{yad2_id}"
+    try:
+        r = cf_requests.get(
+            url,
+            headers={
+                **HEADERS,
+                "Referer": f"{YAD2_BASE_URL}/realestate/item/{yad2_id}",
+            },
+            impersonate="chrome",
+            timeout=10,
+        )
+        if r.status_code == 200:
+            return r.json()
+    except Exception:
+        pass
+    return None

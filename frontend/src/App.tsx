@@ -13,7 +13,8 @@ export default function App() {
         <Route path="/" element={<Navigate to="/rent" replace />} />
         <Route path="/rent" element={<OpportunityPage category="rent" />} />
         <Route path="/buy" element={<OpportunityPage category="forsale" />} />
-        <Route path="/favorites" element={<FavoritesPage />} />
+        <Route path="/listings" element={<FavoritesPage />} />
+        <Route path="/favorites" element={<Navigate to="/listings" replace />} />
         <Route path="/search" element={<SearchPage />} />
         <Route path="/search/results" element={<SearchResultsPage />} />
         <Route path="/property/:yad2Id" element={<PropertyDetailPage />} />

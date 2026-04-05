@@ -36,6 +36,7 @@ export function useWhitelist() {
       qc.invalidateQueries({ queryKey: ['opportunities'] });
       qc.invalidateQueries({ queryKey: ['classifications'] });
       qc.invalidateQueries({ queryKey: ['whitelistIds'] });
+      qc.invalidateQueries({ queryKey: ['whitelistProperties'] });
     },
   });
 }
@@ -49,6 +50,7 @@ export function useRemoveWhitelist() {
       qc.invalidateQueries({ queryKey: ['opportunities'] });
       qc.invalidateQueries({ queryKey: ['classifications'] });
       qc.invalidateQueries({ queryKey: ['whitelistIds'] });
+      qc.invalidateQueries({ queryKey: ['whitelistProperties'] });
     },
   });
 }
@@ -63,6 +65,7 @@ export function useBlacklist() {
       qc.invalidateQueries({ queryKey: ['opportunities'] });
       qc.invalidateQueries({ queryKey: ['classifications'] });
       qc.invalidateQueries({ queryKey: ['blacklistIds'] });
+      qc.invalidateQueries({ queryKey: ['blacklistProperties'] });
     },
   });
 }
@@ -76,6 +79,7 @@ export function useRemoveBlacklist() {
       qc.invalidateQueries({ queryKey: ['opportunities'] });
       qc.invalidateQueries({ queryKey: ['classifications'] });
       qc.invalidateQueries({ queryKey: ['blacklistIds'] });
+      qc.invalidateQueries({ queryKey: ['blacklistProperties'] });
     },
   });
 }
@@ -108,9 +112,10 @@ export function useAddFavorite() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (yad2Id: string) => apiFetch(`/api/favorites/${yad2Id}`, { method: 'POST' }),
-    onSuccess: () => {
+    onSuccess: (_data, yad2Id) => {
       queryClient.invalidateQueries({ queryKey: ['favoriteIds'] });
       queryClient.invalidateQueries({ queryKey: ['favorites'] });
+      queryClient.invalidateQueries({ queryKey: ['property', yad2Id] });
     },
   });
 }
@@ -119,9 +124,10 @@ export function useRemoveFavorite() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (yad2Id: string) => apiFetch(`/api/favorites/${yad2Id}`, { method: 'DELETE' }),
-    onSuccess: () => {
+    onSuccess: (_data, yad2Id) => {
       queryClient.invalidateQueries({ queryKey: ['favoriteIds'] });
       queryClient.invalidateQueries({ queryKey: ['favorites'] });
+      queryClient.invalidateQueries({ queryKey: ['property', yad2Id] });
     },
   });
 }
