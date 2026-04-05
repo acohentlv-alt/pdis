@@ -55,6 +55,12 @@ export default function PropertyCard({
   const weakLanguage = Array.isArray(sd.weak_language_found) && (sd.weak_language_found as unknown[]).length > 0;
   const conditionAlert = Array.isArray(sd.condition_keywords_found) && (sd.condition_keywords_found as unknown[]).length > 0;
   const belowAvgPrice = !!(sd.below_avg_price_sqm);
+  const isNew = (() => {
+    const fs = item.first_seen as string | null;
+    if (!fs) return false;
+    const today = new Date().toISOString().slice(0, 10);
+    return fs.slice(0, 10) === today;
+  })();
 
   const imageUrls = (item.image_urls as string[] | null) ?? [];
   const isAgent = !!(item.is_agent);
@@ -172,6 +178,9 @@ export default function PropertyCard({
       )}
 
       <div className="flex flex-wrap gap-1">
+        {isNew && (
+          <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium">New</span>
+        )}
         {isAgent && (
           <span className="text-xs bg-purple-50 text-purple-600 px-2 py-0.5 rounded-full">Agent</span>
         )}

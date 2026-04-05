@@ -239,10 +239,20 @@ export default function OpportunityPage({ category }: OpportunityPageProps) {
     ? eventPropsLoading
     : tab === 'opportunities' ? oppsLoading : classLoading;
 
+  const greeting = (() => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good morning';
+    if (hour < 17) return 'Good afternoon';
+    return 'Good evening';
+  })();
+
   return (
     <div className="max-w-lg mx-auto px-4 py-4 space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-gray-900">{title}</h1>
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">{title}</h1>
+          <p className="text-sm text-gray-400">{greeting}, Shechter</p>
+        </div>
         <div className="relative">
           <button
             onClick={() => setShowMenu(!showMenu)}
