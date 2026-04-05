@@ -10,9 +10,9 @@ export default function App() {
   return (
     <div className="pb-16">
       <Routes>
-        <Route path="/" element={<Navigate to="/rent" replace />} />
-        <Route path="/rent" element={<OpportunityPage category="rent" />} />
-        <Route path="/buy" element={<OpportunityPage category="forsale" />} />
+        <Route path="/" element={<OpportunityPage />} />
+        <Route path="/rent" element={<Navigate to="/" replace />} />
+        <Route path="/buy" element={<Navigate to="/" replace />} />
         <Route path="/listings" element={<FavoritesPage />} />
         <Route path="/favorites" element={<Navigate to="/listings" replace />} />
         <Route path="/search" element={<SearchPage />} />

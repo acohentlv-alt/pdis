@@ -1,25 +1,70 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import SummaryBar from '../components/SummaryBar';
 import FilterBar from '../components/FilterBar';
 import PropertyCard from '../components/PropertyCard';
 import PresetManager from '../components/PresetManager';
-import { useOpportunities, useClassifications, useFavoriteIds, usePropertiesByEvent, useWhitelistIds, useBlacklistIds, usePropertySearch } from '../api/queries';
+import { usePresetProperties, useAllPresets, useFavoriteIds, useWhitelistIds, useBlacklistIds, useScanStatus } from '../api/queries';
 import { useAddFavorite, useRemoveFavorite, useWhitelist, useRemoveWhitelist, useBlacklist, useRemoveBlacklist } from '../api/mutations';
+import { matchesPresetCriteria, computeTargetPriceSqm } from '../lib/presetMatch';
 
-// Golden neighborhoods — premium TLV neighborhoods for rent opportunities
-const GOLDEN_PATTERNS = ['פלורנטין', 'נווה צדק', 'הצפון הישן', 'הצפון החדש', 'לב תל אביב', 'כרם התימנים'];
+function getPresetSummary(preset: Record<string, unknown>): string {
+  const parts: string[] = [];
 
-type Tab = 'opportunities' | 'fullscan';
+  const minRooms = preset.min_rooms as number | null;
+  const maxRooms = preset.max_rooms as number | null;
+  if (minRooms != null || maxRooms != null) {
+    if (minRooms != null && maxRooms != null) {
+      parts.push(`${minRooms}-${maxRooms} rooms`);
+    } else if (minRooms != null) {
+      parts.push(`${minRooms}+ rooms`);
+    } else {
+      parts.push(`Up to ${maxRooms} rooms`);
+    }
+  }
+
+  const minPrice = preset.min_price as number | null;
+  const maxPrice = preset.max_price as number | null;
+  if (minPrice != null || maxPrice != null) {
+    const fmt = (n: number) => n >= 1000000 ? `${(n / 1000000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}K` : String(n);
+    if (minPrice != null && maxPrice != null) {
+      parts.push(`${fmt(minPrice)}-${fmt(maxPrice)}`);
+    } else if (maxPrice != null) {
+      parts.push(`Up to ${fmt(maxPrice)}`);
+    } else {
+      parts.push(`From ${fmt(minPrice!)}`);
+    }
+  }
+
+  const extraParams = preset.extra_params as Record<string, unknown> | null;
+  const minSqm = extraParams?.min_sqm as number | null | undefined;
+  if (minSqm != null) {
+    parts.push(`${minSqm}m²+`);
+  }
+
+  const propertyTypes = preset.property_types as string[] | null;
+  if (propertyTypes && propertyTypes.length > 0) {
+    const typeLabel = propertyTypes.map(t => t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())).join(', ');
+    parts.push(typeLabel);
+  }
+
+  const neighborhood = preset.neighborhood as string | null;
+  if (neighborhood && neighborhood.trim()) {
+    const hoodCount = neighborhood.split(',').filter(Boolean).length;
+    if (hoodCount > 1) {
+      parts.push(`${hoodCount} hoods`);
+    }
+  }
+
+  return parts.join(' · ');
+}
 
 function applyFilters(
   items: Record<string, unknown>[],
   neighborhoods: string[],
   selectedRooms: string[],
-  classification: string,
   source: string,
   sortBy: string,
-  tab: Tab,
   keyword: string,
   minPriceSqm: string,
   maxPriceSqm: string
@@ -40,9 +85,6 @@ function applyFilters(
   }
   if (source) {
     result = result.filter(i => i.source === source);
-  }
-  if (tab === 'fullscan' && classification) {
-    result = result.filter(i => i.classification === classification);
   }
   if (keyword.trim()) {
     const kw = keyword.toLowerCase();
@@ -82,162 +124,148 @@ function applyFilters(
       const bPsqm = ((b.price as number) ?? 0) / (((b.square_meter_build as number) || (b.square_meters as number)) || 1);
       return aPsqm - bPsqm;
     }
-    // default: by classification (hot > warm > cold), then updated_at
-    const classOrder: Record<string, number> = { hot: 0, warm: 1, cold: 2 };
-    const aClass = classOrder[(a.classification as string) ?? 'cold'] ?? 2;
-    const bClass = classOrder[(b.classification as string) ?? 'cold'] ?? 2;
-    if (aClass !== bClass) return aClass - bClass;
+    // default: longest on market first, then most recently updated
+    const domDiff = ((b.days_on_market as number) ?? 0) - ((a.days_on_market as number) ?? 0);
+    if (domDiff !== 0) return domDiff;
     return new Date((b.updated_at as string) ?? '').getTime() - new Date((a.updated_at as string) ?? '').getTime();
   });
 
   return result;
 }
 
-const STAT_LABELS: Record<string, string> = {
-  price_drop: 'Price Drops',
-  relisting: 'Reappeared',
-};
+export default function OpportunityPage() {
+  // ALL hooks must be before any early return — this is critical to avoid React error #310
 
-interface OpportunityPageProps {
-  category: 'rent' | 'forsale';
-}
+  const queryClient = useQueryClient();
 
-export default function OpportunityPage({ category }: OpportunityPageProps) {
-  const title = category === 'rent' ? 'Rental Hunter' : 'Purchase Hunter';
+  // Preset selection state — persisted in localStorage
+  const [selectedPresetId, setSelectedPresetId] = useState<number | null>(() => {
+    const stored = localStorage.getItem('pdis_selected_preset');
+    return stored ? Number(stored) : null;
+  });
 
-  const [searchParams, setSearchParams] = useSearchParams();
-
-  // Restore filter state from URL params
-  const [tab, setTab] = useState<Tab>((searchParams.get('tab') as Tab) || 'opportunities');
-  const [neighborhoods, setNeighborhoods] = useState<string[]>(searchParams.get('neighborhoods') ? searchParams.get('neighborhoods')!.split(',') : []);
-  const [selectedRooms, setSelectedRooms] = useState<string[]>(searchParams.get('rooms') ? searchParams.get('rooms')!.split(',') : []);
-  const [classification, setClassification] = useState(searchParams.get('classification') || '');
-  const [source, setSource] = useState(searchParams.get('source') || '');
-  const [sortBy, setSortBy] = useState(searchParams.get('sortBy') || 'signals');
-  const [minPriceSqm, setMinPriceSqm] = useState(searchParams.get('minPriceSqm') || '');
-  const [maxPriceSqm, setMaxPriceSqm] = useState(searchParams.get('maxPriceSqm') || '');
-  const [keyword, setKeyword] = useState(searchParams.get('keyword') || '');
-  const [debouncedKeyword, setDebouncedKeyword] = useState(searchParams.get('keyword') || '');
-  const [showMenu, setShowMenu] = useState(false);
+  // Filter state
+  const [neighborhoods, setNeighborhoods] = useState<string[]>([]);
+  const [selectedRooms, setSelectedRooms] = useState<string[]>([]);
+  const [source, setSource] = useState('');
+  const [sortBy, setSortBy] = useState('days_on_market');
+  const [minPriceSqm, setMinPriceSqm] = useState('');
+  const [maxPriceSqm, setMaxPriceSqm] = useState('');
+  const [keyword, setKeyword] = useState('');
+  const [debouncedKeyword, setDebouncedKeyword] = useState('');
+  const [activeStatFilter, setActiveStatFilter] = useState<string | null>(null);
   const [showPresets, setShowPresets] = useState(false);
-  const [activeStatFilter, setActiveStatFilter] = useState<string | null>(searchParams.get('statFilter') || null);
-  const [searchAllQuery, setSearchAllQuery] = useState('');
 
+  // Keyword debounce
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedKeyword(keyword), 300);
     return () => clearTimeout(timer);
   }, [keyword]);
 
-  // Sync all filters to URL params
-  useEffect(() => {
-    const params = new URLSearchParams();
-    if (debouncedKeyword) params.set('keyword', debouncedKeyword);
-    if (tab !== 'opportunities') params.set('tab', tab);
-    if (neighborhoods.length > 0) params.set('neighborhoods', neighborhoods.join(','));
-    if (selectedRooms.length > 0) params.set('rooms', selectedRooms.join(','));
-    if (classification) params.set('classification', classification);
-    if (source) params.set('source', source);
-    if (sortBy && sortBy !== 'signals') params.set('sortBy', sortBy);
-    if (minPriceSqm) params.set('minPriceSqm', minPriceSqm);
-    if (maxPriceSqm) params.set('maxPriceSqm', maxPriceSqm);
-    if (activeStatFilter) params.set('statFilter', activeStatFilter);
-    setSearchParams(params, { replace: true });
-  }, [debouncedKeyword, tab, neighborhoods, selectedRooms, classification, source, sortBy, minPriceSqm, maxPriceSqm, activeStatFilter]);
+  // Data fetching
+  const { data: presetsData } = useAllPresets();
+  const allPresets = (presetsData?.presets ?? []) as Record<string, unknown>[];
 
-  const { data: oppsData, isLoading: oppsLoading } = useOpportunities(category);
-  const { data: classData, isLoading: classLoading } = useClassifications(category);
+  const { data: presetPropsData, isLoading } = usePresetProperties(selectedPresetId);
+  const allItems = (presetPropsData?.properties ?? []) as Record<string, unknown>[];
+
   const { data: favData } = useFavoriteIds();
   const { data: whitelistData } = useWhitelistIds();
   const { data: blacklistData } = useBlacklistIds();
-  const { data: searchData, isLoading: searchLoading } = usePropertySearch(searchAllQuery, category);
-  const { data: eventPropsData, isLoading: eventPropsLoading } = usePropertiesByEvent(
-    activeStatFilter && activeStatFilter !== 'opportunities' ? activeStatFilter : null,
-    category
-  );
+  const { data: scanStatus } = useScanStatus();
+
   const favIds = useMemo(() => new Set(favData?.ids ?? []), [favData]);
   const whitelistIds = useMemo(() => new Set(whitelistData?.ids ?? []), [whitelistData]);
   const blacklistIds = useMemo(() => new Set(blacklistData?.ids ?? []), [blacklistData]);
+
   const addFav = useAddFavorite();
   const removeFav = useRemoveFavorite();
   const addWhitelist = useWhitelist();
   const removeWhitelist = useRemoveWhitelist();
   const addBlacklist = useBlacklist();
   const removeBlacklist = useRemoveBlacklist();
-  const handleToggleFav = (yad2Id: string, isFav: boolean) => {
-    if (isFav) removeFav.mutate(yad2Id);
-    else addFav.mutate(yad2Id);
-  };
-  const handleToggleWhitelist = (yad2Id: string) => {
-    if (whitelistIds.has(yad2Id)) removeWhitelist.mutate(yad2Id);
-    else addWhitelist.mutate(yad2Id);
-  };
-  const handleToggleBlacklist = (yad2Id: string) => {
-    if (blacklistIds.has(yad2Id)) removeBlacklist.mutate(yad2Id);
-    else addBlacklist.mutate(yad2Id);
-  };
 
-  const handleStatClick = (stat: string) => {
-    setKeyword('');
-    setDebouncedKeyword('');
-    setSearchAllQuery('');
-    setNeighborhoods([]);
-    setSelectedRooms([]);
-    setSource('');
-    setClassification('');
-    setMinPriceSqm('');
-    setMaxPriceSqm('');
-    setSortBy('signals');
-    if (stat === 'opportunities') {
-      setTab('opportunities');
-      setActiveStatFilter(null);
-      return;
-    }
-    if (stat === 'fullscan') {
-      setTab('fullscan');
-      setActiveStatFilter(null);
-      return;
-    }
-    setActiveStatFilter(prev => prev === stat ? null : stat);
-  };
-
-  const rawItems = useMemo(() => {
-    if (activeStatFilter && activeStatFilter !== 'opportunities') {
-      return (eventPropsData?.properties ?? []) as Record<string, unknown>[];
-    }
-    if (tab === 'opportunities') {
-      return (oppsData?.opportunities ?? []) as Record<string, unknown>[];
-    }
-    return (classData?.classifications ?? []) as Record<string, unknown>[];
-  }, [tab, oppsData, classData, activeStatFilter, eventPropsData]);
-
-  // Auto-select golden neighborhoods for rent opportunities (once, on initial load only)
-  const hasAppliedDefaults = useRef(false);
+  // Auto-select first preset if none selected
   useEffect(() => {
-    if (
-      !hasAppliedDefaults.current &&
-      category === 'rent' &&
-      tab === 'opportunities' &&
-      !activeStatFilter &&
-      !searchParams.get('neighborhoods') &&
-      rawItems.length > 0
-    ) {
-      const allNeighborhoods = [...new Set(rawItems.map(i => i.neighborhood as string).filter(Boolean))];
-      const golden = allNeighborhoods.filter(n => GOLDEN_PATTERNS.some(p => n.includes(p)));
-      if (golden.length > 0) {
-        setNeighborhoods(golden);
-        hasAppliedDefaults.current = true;
-      }
+    if (selectedPresetId === null && allPresets.length > 0) {
+      const firstId = allPresets[0].id as number;
+      setSelectedPresetId(firstId);
+      localStorage.setItem('pdis_selected_preset', String(firstId));
     }
-  }, [rawItems, category, tab, activeStatFilter]);
+  }, [allPresets, selectedPresetId]);
+
+  // Bug 3: Detect scan completion and refresh data
+  const prevRunning = useRef(false);
+  useEffect(() => {
+    const isRunning = scanStatus?.running ?? false;
+    if (prevRunning.current && !isRunning) {
+      // Scan just finished — refresh data
+      queryClient.invalidateQueries({ queryKey: ['presetProperties'] });
+      queryClient.invalidateQueries({ queryKey: ['presets'] });
+    }
+    prevRunning.current = isRunning;
+  }, [scanStatus?.running, queryClient]);
+
+  // SummaryBar stats derived from allItems (full set, not filtered)
+  const summaryStats = useMemo(() => {
+    const scanned = allItems.length;
+    const priceDrops = allItems.filter(i => {
+      const sd = (i.signal_details as Record<string, unknown>) ?? {};
+      return (sd.price_drops as number ?? 0) > 0;
+    }).length;
+    const reappeared = allItems.filter(i => {
+      const sd = (i.signal_details as Record<string, unknown>) ?? {};
+      return (sd.relisting_count as number ?? 0) > 0 || !!(sd.has_relisting);
+    }).length;
+    return { scanned, priceDrops, reappeared };
+  }, [allItems]);
+
+  // Client-side stat filtering applied on top of allItems
+  const rawItems = useMemo(() => {
+    if (!activeStatFilter) return allItems;
+    switch (activeStatFilter) {
+      case 'scanned':
+        return allItems;
+      case 'price_drop':
+        return allItems.filter(i => {
+          const sd = (i.signal_details as Record<string, unknown>) ?? {};
+          return (sd.price_drops as number ?? 0) > 0;
+        });
+      case 'relisting':
+        return allItems.filter(i => {
+          const sd = (i.signal_details as Record<string, unknown>) ?? {};
+          return (sd.relisting_count as number ?? 0) > 0 || !!(sd.has_relisting);
+        });
+      default:
+        return allItems;
+    }
+  }, [allItems, activeStatFilter]);
 
   const filtered = useMemo(
-    () => applyFilters(rawItems, neighborhoods, selectedRooms, classification, source, sortBy, tab, debouncedKeyword, minPriceSqm, maxPriceSqm),
-    [rawItems, neighborhoods, selectedRooms, classification, source, sortBy, tab, debouncedKeyword, minPriceSqm, maxPriceSqm]
+    () => applyFilters(rawItems, neighborhoods, selectedRooms, source, sortBy, debouncedKeyword, minPriceSqm, maxPriceSqm),
+    [rawItems, neighborhoods, selectedRooms, source, sortBy, debouncedKeyword, minPriceSqm, maxPriceSqm]
   );
 
-  const isLoading = activeStatFilter && activeStatFilter !== 'opportunities'
-    ? eventPropsLoading
-    : tab === 'opportunities' ? oppsLoading : classLoading;
+  // Phase 2: split filtered into matching vs other based on preset criteria
+  const selectedPreset = allPresets.find(p => (p.id as number) === selectedPresetId) ?? null;
+
+  const [matchingItems, otherItems] = useMemo(() => {
+    if (!selectedPreset) return [filtered, [] as Record<string, unknown>[]];
+    const matching: Record<string, unknown>[] = [];
+    const other: Record<string, unknown>[] = [];
+    for (const item of filtered) {
+      if (matchesPresetCriteria(item, selectedPreset)) {
+        matching.push(item);
+      } else {
+        other.push(item);
+      }
+    }
+    return [matching, other];
+  }, [filtered, selectedPreset]);
+
+  const targetPriceSqm = useMemo(() =>
+    selectedPreset ? computeTargetPriceSqm(selectedPreset) : null
+  , [selectedPreset]);
 
   const greeting = (() => {
     const hour = new Date().getHours();
@@ -246,138 +274,183 @@ export default function OpportunityPage({ category }: OpportunityPageProps) {
     return 'Good evening';
   })();
 
+  function selectPreset(id: number) {
+    setSelectedPresetId(id);
+    localStorage.setItem('pdis_selected_preset', String(id));
+    setActiveStatFilter(null);
+  }
+
+  function handleStatClick(stat: string) {
+    if (stat === 'scanned') {
+      setActiveStatFilter(null);
+      return;
+    }
+    setActiveStatFilter(prev => prev === stat ? null : stat);
+  }
+
+  function handleToggleFav(yad2Id: string, isFav: boolean) {
+    if (isFav) removeFav.mutate(yad2Id);
+    else addFav.mutate(yad2Id);
+  }
+
+  function handleToggleWhitelist(yad2Id: string) {
+    if (whitelistIds.has(yad2Id)) removeWhitelist.mutate(yad2Id);
+    else addWhitelist.mutate(yad2Id);
+  }
+
+  function handleToggleBlacklist(yad2Id: string) {
+    if (blacklistIds.has(yad2Id)) removeBlacklist.mutate(yad2Id);
+    else addBlacklist.mutate(yad2Id);
+  }
+
   return (
-    <div className="max-w-lg mx-auto px-4 py-4 space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">{title}</h1>
-          <p className="text-sm text-gray-400">{greeting}, Shechter</p>
-        </div>
-        <div className="relative">
-          <button
-            onClick={() => setShowMenu(!showMenu)}
-            className="p-2 text-gray-500 hover:text-gray-800 text-xl"
-          >&#8942;</button>
-          {showMenu && (
-            <div className="absolute right-0 top-full mt-1 bg-white rounded-lg shadow-lg border py-1 z-50 min-w-[160px]">
-              <button
-                onClick={() => { setShowPresets(true); setShowMenu(false); }}
-                className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50"
-              >Manage Presets</button>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <SummaryBar
-        onStatClick={handleStatClick}
-        activeFilter={activeStatFilter ?? (tab === 'fullscan' ? 'fullscan' : tab === 'opportunities' ? 'opportunities' : null)}
-        category={category}
-      />
-
-      <FilterBar
-        items={rawItems}
-        neighborhoods={neighborhoods}
-        setNeighborhoods={setNeighborhoods}
-        selectedRooms={selectedRooms}
-        setSelectedRooms={setSelectedRooms}
-        classification={classification}
-        setClassification={setClassification}
-        source={source}
-        setSource={setSource}
-        sortBy={sortBy}
-        setSortBy={setSortBy}
-        showClassificationFilter={tab === 'fullscan' && !activeStatFilter}
-        keyword={keyword}
-        setKeyword={setKeyword}
-        minPriceSqm={minPriceSqm}
-        maxPriceSqm={maxPriceSqm}
-        onMinPriceSqmChange={setMinPriceSqm}
-        onMaxPriceSqmChange={setMaxPriceSqm}
-      />
-
-      {activeStatFilter && activeStatFilter !== 'opportunities' && activeStatFilter !== 'fullscan' && (
-        <div className="flex items-center gap-2 px-1">
-          <span className="text-sm text-gray-600 font-medium">
-            Showing: {STAT_LABELS[activeStatFilter] ?? activeStatFilter}
-          </span>
-          <button
-            onClick={() => { setActiveStatFilter(null); setTab('opportunities'); }}
-            className="text-xs text-gray-400 hover:text-gray-700 underline"
-          >
-            Clear
-          </button>
-        </div>
-      )}
-
-      {isLoading && (
-        <div className="text-center text-gray-400 py-8">Loading…</div>
-      )}
-
-      {/* Search all properties mode */}
-      {searchAllQuery && (
-        <div className="flex items-center gap-2 px-1">
-          <span className="text-sm text-gray-600 font-medium">
-            Searching all properties for "{searchAllQuery}"
-            {searchData && ` — ${searchData.properties.length} result${searchData.properties.length !== 1 ? 's' : ''}`}
-          </span>
-          <button
-            onClick={() => setSearchAllQuery('')}
-            className="text-xs text-gray-400 hover:text-gray-700 underline"
-          >
-            Clear
-          </button>
-        </div>
-      )}
-
-      {!isLoading && !searchAllQuery && filtered.length === 0 && (
-        <div className="text-center text-gray-400 py-8 space-y-2">
-          <div>No properties found.</div>
-          {debouncedKeyword.length >= 2 && (
+    <div className="min-h-screen bg-gray-50 pb-20">
+      <div className="p-4 space-y-3">
+        {/* Header: Greeting + Scan status + Refresh + Gear */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <p className="text-lg font-semibold text-gray-900">{greeting}, Shechter</p>
+            {scanStatus?.running && (
+              <span className="text-xs text-blue-500 animate-pulse">Scanning...</span>
+            )}
+          </div>
+          <div className="flex items-center gap-1">
             <button
-              onClick={() => setSearchAllQuery(debouncedKeyword)}
-              className="text-sm text-blue-600 hover:text-blue-800 underline"
-            >
-              Search all properties for "{debouncedKeyword}"
+              onClick={() => queryClient.invalidateQueries({ queryKey: ['presetProperties', selectedPresetId] })}
+              className="p-2 text-gray-500 hover:text-gray-800 text-lg"
+            >↻</button>
+            <button
+              onClick={() => setShowPresets(true)}
+              className="p-2 text-gray-500 hover:text-gray-800 text-xl"
+            >⚙️</button>
+          </div>
+        </div>
+
+        {/* Preset Pills */}
+        <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+          {allPresets.map(p => {
+            const id = p.id as number;
+            const isSelected = id === selectedPresetId;
+            const pillSummary = getPresetSummary(p);
+            return (
+              <button
+                key={id}
+                onClick={() => selectPreset(id)}
+                className={`px-4 py-2 rounded-full whitespace-nowrap shrink-0 border transition-colors text-left ${
+                  isSelected ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-300'
+                }`}
+              >
+                <span className="block text-sm font-medium">{p.name as string}</span>
+                {pillSummary && (
+                  <span className="block text-[10px] opacity-70">{pillSummary}</span>
+                )}
+              </button>
+            );
+          })}
+          <button
+            onClick={() => setShowPresets(true)}
+            className="px-4 py-2 text-sm rounded-full whitespace-nowrap shrink-0 border border-dashed border-gray-300 text-gray-500"
+          >+</button>
+        </div>
+
+        {/* SummaryBar — stats from full allItems */}
+        <SummaryBar
+          scanned={summaryStats.scanned}
+          priceDrops={summaryStats.priceDrops}
+          reappeared={summaryStats.reappeared}
+          onStatClick={handleStatClick}
+          activeFilter={activeStatFilter}
+        />
+
+        {/* Active stat filter label */}
+        {activeStatFilter && activeStatFilter !== 'scanned' && (
+          <div className="flex items-center gap-2 text-sm text-gray-600">
+            <span>
+              Showing:{' '}
+              {activeStatFilter === 'price_drop'
+                ? 'Price Drops'
+                : activeStatFilter === 'relisting'
+                ? 'Reappeared'
+                : activeStatFilter}
+            </span>
+            <button onClick={() => setActiveStatFilter(null)} className="text-blue-600 text-xs">
+              Clear
             </button>
+          </div>
+        )}
+
+        {/* FilterBar */}
+        <FilterBar
+          items={rawItems}
+          neighborhoods={neighborhoods}
+          setNeighborhoods={setNeighborhoods}
+          selectedRooms={selectedRooms}
+          setSelectedRooms={setSelectedRooms}
+          source={source}
+          setSource={setSource}
+          sortBy={sortBy}
+          setSortBy={setSortBy}
+          keyword={keyword}
+          setKeyword={setKeyword}
+          minPriceSqm={minPriceSqm}
+          maxPriceSqm={maxPriceSqm}
+          onMinPriceSqmChange={setMinPriceSqm}
+          onMaxPriceSqmChange={setMaxPriceSqm}
+        />
+
+        {/* No presets empty state */}
+        {allPresets.length === 0 && !isLoading && (
+          <div className="text-center text-gray-400 py-8">
+            No presets yet. Tap + to create your first search.
+          </div>
+        )}
+
+        {/* Loading */}
+        {isLoading && (
+          <div className="text-center text-gray-400 py-8">Loading...</div>
+        )}
+
+        {/* Property list — split into matching and other */}
+        <div className="space-y-3 pb-8">
+          {matchingItems.map(item => (
+            <PropertyCard
+              key={item.yad2_id as string}
+              item={item}
+              favoriteIds={favIds}
+              onToggleFavorite={handleToggleFav}
+              isWhitelisted={whitelistIds.has(item.yad2_id as string)}
+              isBlacklisted={blacklistIds.has(item.yad2_id as string)}
+              onToggleWhitelist={() => handleToggleWhitelist(item.yad2_id as string)}
+              onToggleBlacklist={() => handleToggleBlacklist(item.yad2_id as string)}
+              targetPriceSqm={targetPriceSqm}
+            />
+          ))}
+          {otherItems.length > 0 && (
+            <>
+              <div className="text-xs text-gray-400 uppercase tracking-wide pt-4 pb-1">Other results</div>
+              {otherItems.map(item => (
+                <PropertyCard
+                  key={item.yad2_id as string}
+                  item={item}
+                  favoriteIds={favIds}
+                  onToggleFavorite={handleToggleFav}
+                  isWhitelisted={whitelistIds.has(item.yad2_id as string)}
+                  isBlacklisted={blacklistIds.has(item.yad2_id as string)}
+                  onToggleWhitelist={() => handleToggleWhitelist(item.yad2_id as string)}
+                  onToggleBlacklist={() => handleToggleBlacklist(item.yad2_id as string)}
+                  targetPriceSqm={targetPriceSqm}
+                />
+              ))}
+            </>
+          )}
+          {!isLoading && matchingItems.length === 0 && otherItems.length === 0 && allPresets.length > 0 && (
+            <div className="text-center text-gray-400 py-8">No properties match your filters.</div>
           )}
         </div>
-      )}
-
-      {searchLoading && searchAllQuery && (
-        <div className="text-center text-gray-400 py-8">Searching…</div>
-      )}
-
-      <div className="space-y-3 pb-8">
-        {searchAllQuery
-          ? (searchData?.properties ?? []).map(item => (
-              <PropertyCard
-                key={item.yad2_id as string}
-                item={item}
-                favoriteIds={favIds}
-                onToggleFavorite={handleToggleFav}
-                isWhitelisted={whitelistIds.has(item.yad2_id as string)}
-                isBlacklisted={blacklistIds.has(item.yad2_id as string)}
-                onToggleWhitelist={() => handleToggleWhitelist(item.yad2_id as string)}
-                onToggleBlacklist={() => handleToggleBlacklist(item.yad2_id as string)}
-              />
-            ))
-          : filtered.map(item => (
-              <PropertyCard
-                key={item.yad2_id as string}
-                item={item}
-                favoriteIds={favIds}
-                onToggleFavorite={handleToggleFav}
-                isWhitelisted={whitelistIds.has(item.yad2_id as string)}
-                isBlacklisted={blacklistIds.has(item.yad2_id as string)}
-                onToggleWhitelist={() => handleToggleWhitelist(item.yad2_id as string)}
-                onToggleBlacklist={() => handleToggleBlacklist(item.yad2_id as string)}
-              />
-            ))
-        }
       </div>
 
-      <PresetManager open={showPresets} onClose={() => setShowPresets(false)} category={category} />
+      {/* PresetManager */}
+      <PresetManager open={showPresets} onClose={() => setShowPresets(false)} />
     </div>
   );
 }

@@ -130,13 +130,10 @@ export default function SearchResultsPage() {
           setNeighborhoods={setNeighborhoods}
           selectedRooms={selectedRooms}
           setSelectedRooms={setSelectedRooms}
-          classification=""
-          setClassification={() => {}}
           source=""
           setSource={() => {}}
           sortBy={sortBy}
           setSortBy={setSortBy}
-          showClassificationFilter={false}
           keyword={keyword}
           setKeyword={setKeyword}
           minPriceSqm=""

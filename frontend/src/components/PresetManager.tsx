@@ -1,10 +1,12 @@
 import { useState } from 'react';
-import { useAllPresets } from '../api/queries';
+import { useAllPresets, useNeighborhoods } from '../api/queries';
 import {
   useCreatePreset,
   useUpdatePreset,
   useDeletePreset,
   useTogglePreset,
+  useClonePreset,
+  useScanPreset,
 } from '../api/mutations';
 
 interface PresetManagerProps {
@@ -52,6 +54,9 @@ const PROPERTY_TYPE_OPTIONS = [
   { value: 'mini_penthouse', label: 'Rooftop' },
   { value: 'studio', label: 'Studio/Loft' },
   { value: 'duplex', label: 'Duplex' },
+  { value: 'house', label: 'House' },
+  { value: 'cottage', label: 'Cottage' },
+  { value: 'land', label: 'Land' },
   { value: 'housing_unit', label: 'Unit' },
   { value: 'other', label: 'Other' },
 ];
@@ -202,6 +207,8 @@ export default function PresetManager({ open, onClose, category }: PresetManager
   const updatePreset = useUpdatePreset();
   const deletePreset = useDeletePreset();
   const togglePreset = useTogglePreset();
+  const clonePreset = useClonePreset();
+  const scanPreset = useScanPreset();
 
   const [showCreate, setShowCreate] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -210,13 +217,15 @@ export default function PresetManager({ open, onClose, category }: PresetManager
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
+  // Must be before early return — hooks cannot be conditional
+  const { data: hoodData } = useNeighborhoods(form.city_code || null);
+
   if (!open) return null;
 
-  const allPresets = (data?.presets ?? []) as Record<string, unknown>[];
-  const presets = allPresets.filter(p => !category || p.category === category);
+  const presets = (data?.presets ?? []) as Record<string, unknown>[];
 
   function startCreate() {
-    setForm({ ...emptyForm(), category: category ?? 'rent' });
+    setForm({ ...emptyForm(), category: 'rent' });
     setFormError(null);
     setEditingId(null);
     setShowCreate(true);
@@ -363,16 +372,56 @@ export default function PresetManager({ open, onClose, category }: PresetManager
             {/* Location */}
             <div>
               <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Location</div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className={labelCls}>Area code</label>
-                  <input className={inputCls} value={form.area_code} onChange={e => setField('area_code', e.target.value)} placeholder="e.g. 2" />
-                </div>
-                <div>
-                  <label className={labelCls}>Neighborhood</label>
-                  <input className={inputCls} value={form.neighborhood} onChange={e => setField('neighborhood', e.target.value)} placeholder="e.g. Florentin" />
-                </div>
+              <div className="mb-2">
+                <label className={labelCls}>Area code</label>
+                <input className={inputCls} value={form.area_code} onChange={e => setField('area_code', e.target.value)} placeholder="e.g. 2" />
               </div>
+              {/* Neighborhood checkbox picker */}
+              {(() => {
+                const selectedHoods = new Set(
+                  form.neighborhood?.split(',').filter(Boolean).map(Number) || []
+                );
+                return (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Neighborhoods</label>
+                    {selectedHoods.size > 0 && (
+                      <div className="text-xs text-gray-500 mb-1">{selectedHoods.size} selected</div>
+                    )}
+                    <div className="max-h-48 overflow-y-auto border rounded-lg p-2 space-y-1">
+                      {(hoodData?.neighborhoods || []).map(h => {
+                        const isChecked = selectedHoods.has(h.hood_id);
+                        return (
+                          <label key={h.hood_id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => {
+                                const newSet = new Set(selectedHoods);
+                                if (isChecked) {
+                                  newSet.delete(h.hood_id);
+                                } else {
+                                  newSet.add(h.hood_id);
+                                }
+                                const newValue = Array.from(newSet).join(',');
+                                setForm(prev => ({ ...prev, neighborhood: newValue }));
+                              }}
+                              className="rounded"
+                            />
+                            <span className="flex-1">{h.neighborhood}</span>
+                            <span className="text-xs text-gray-400">{h.listing_count}</span>
+                          </label>
+                        );
+                      })}
+                      {(!hoodData?.neighborhoods || hoodData.neighborhoods.length === 0) && form.city_code && (
+                        <div className="text-xs text-gray-400 py-2 text-center">No neighborhoods found for this city</div>
+                      )}
+                      {!form.city_code && (
+                        <div className="text-xs text-gray-400 py-2 text-center">Enter a city code first</div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Property types */}
@@ -554,6 +603,30 @@ export default function PresetManager({ open, onClose, category }: PresetManager
           const roomsRange = formatRoomsRange(preset.min_rooms, preset.max_rooms);
           const src = sourceLabel(preset);
 
+          // Neighborhood display — resolve names from hoodData when city matches
+          const hoodStr = preset.neighborhood as string | null;
+          const hoodIds = hoodStr && hoodStr.trim()
+            ? hoodStr.split(',').filter(s => s.trim()).map(Number).filter(n => !isNaN(n))
+            : [];
+          let hoodLabel = 'All neighborhoods';
+          if (hoodIds.length > 0) {
+            const hoodMap = new Map((hoodData?.neighborhoods || []).map(h => [h.hood_id, h.neighborhood]));
+            const resolvedNames = hoodIds.map(id => hoodMap.get(id)).filter(Boolean) as string[];
+            if (resolvedNames.length > 0) {
+              const shown = resolvedNames.slice(0, 2).join(', ');
+              const extra = resolvedNames.length > 2 ? ` +${resolvedNames.length - 2} more` : '';
+              hoodLabel = shown + extra;
+            } else {
+              hoodLabel = `${hoodIds.length} neighborhood${hoodIds.length > 1 ? 's' : ''}`;
+            }
+          }
+
+          // Property types
+          const propTypes = preset.property_types as string[] | null;
+          const propTypesLabel = propTypes && propTypes.length > 0
+            ? propTypes.map(t => PROPERTY_TYPE_OPTIONS.find(o => o.value === t)?.label ?? t).join(', ')
+            : null;
+
           const meta = [priceRange, roomsRange, src].filter(Boolean).join(' · ');
 
           return (
@@ -572,9 +645,10 @@ export default function PresetManager({ open, onClose, category }: PresetManager
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-sm text-gray-900 truncate">{preset.name as string}</div>
                   {meta && <div className="text-xs text-gray-500 mt-0.5">{meta}</div>}
+                  <div className="text-xs text-gray-400 mt-0.5">{hoodLabel}{propTypesLabel ? ` · ${propTypesLabel}` : ''}</div>
                 </div>
 
-                {/* Edit / Delete */}
+                {/* Edit / Delete / Clone / Run Now */}
                 <div className="flex gap-1 shrink-0">
                   <button
                     onClick={() => startEdit(preset)}
@@ -584,6 +658,18 @@ export default function PresetManager({ open, onClose, category }: PresetManager
                     onClick={() => setConfirmDeleteId(id)}
                     className="px-2 py-1 text-xs rounded-lg border border-red-200 text-red-600 hover:bg-red-50"
                   >Delete</button>
+                  <button
+                    onClick={() => clonePreset.mutate(id)}
+                    disabled={clonePreset.isPending}
+                    className="px-2 py-1 text-xs rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50"
+                  >Clone</button>
+                  {isActive && (
+                    <button
+                      onClick={() => scanPreset.mutate(id)}
+                      disabled={scanPreset.isPending}
+                      className="px-2 py-1 text-xs rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50"
+                    >{scanPreset.isPending ? 'Scanning...' : 'Run Now'}</button>
+                  )}
                 </div>
               </div>
 

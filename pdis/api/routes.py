@@ -32,6 +32,44 @@ async def health():
 
 
 # ---------------------------------------------------------------------------
+# Neighborhoods
+# ---------------------------------------------------------------------------
+
+@router.get("/api/neighborhoods")
+async def list_neighborhoods(city_code: str = Query(default=None)):
+    """Return distinct hood_id/neighborhood pairs, grouped by city if city_code given."""
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            if city_code:
+                await cur.execute(
+                    "SELECT id FROM search_presets WHERE city_code = %s",
+                    (city_code,),
+                )
+                preset_ids = [r["id"] for r in await cur.fetchall()]
+                if not preset_ids:
+                    return {"neighborhoods": []}
+                await cur.execute(
+                    """SELECT DISTINCT hood_id, neighborhood, COUNT(*) as listing_count
+                       FROM properties
+                       WHERE hood_id IS NOT NULL AND neighborhood IS NOT NULL
+                         AND (preset_id = ANY(%s) OR preset_id IS NULL)
+                       GROUP BY hood_id, neighborhood
+                       ORDER BY neighborhood""",
+                    (preset_ids,),
+                )
+            else:
+                await cur.execute(
+                    """SELECT DISTINCT hood_id, neighborhood, COUNT(*) as listing_count
+                       FROM properties
+                       WHERE hood_id IS NOT NULL AND neighborhood IS NOT NULL
+                       GROUP BY hood_id, neighborhood
+                       ORDER BY neighborhood"""
+                )
+            rows = await cur.fetchall()
+    return {"neighborhoods": [dict(r) for r in rows]}
+
+
+# ---------------------------------------------------------------------------
 # Presets
 # ---------------------------------------------------------------------------
 
@@ -79,6 +117,121 @@ async def get_latest_preset_stats(category: str | None = Query(default=None)):
             )
             rows = await cur.fetchall()
     return {"presets": [dict(r) for r in rows]}
+
+
+@router.get("/api/presets/{preset_id}/properties")
+async def get_preset_properties(
+    preset_id: int,
+    page: int = Query(default=1),
+    per_page: int = Query(default=500),
+):
+    """Return properties matching a preset's criteria (city-scoped, not preset_id filtered)."""
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            # 1. Load the preset
+            await cur.execute("SELECT * FROM search_presets WHERE id = %s", (preset_id,))
+            preset = await cur.fetchone()
+            if not preset:
+                raise HTTPException(404, "Preset not found")
+            preset = dict(preset)
+
+            # 2. Find all preset IDs with the same city_code
+            await cur.execute(
+                "SELECT id FROM search_presets WHERE city_code = %s",
+                (preset["city_code"],),
+            )
+            city_preset_ids = [r["id"] for r in await cur.fetchall()]
+
+            # 3. Build dynamic WHERE clauses
+            conditions = [
+                "(p.preset_id = ANY(%s) OR p.preset_id IS NULL)",
+                "p.category = %s",
+                "p.is_active = TRUE",
+                "bl.id IS NULL",
+            ]
+            params: list = [city_preset_ids, preset["category"]]
+
+            if preset.get("min_price") is not None:
+                conditions.append("p.price >= %s")
+                params.append(preset["min_price"])
+            if preset.get("max_price") is not None:
+                conditions.append("p.price <= %s")
+                params.append(preset["max_price"])
+            if preset.get("min_rooms") is not None:
+                conditions.append("p.rooms >= %s")
+                params.append(preset["min_rooms"])
+            if preset.get("max_rooms") is not None:
+                conditions.append("p.rooms <= %s")
+                params.append(preset["max_rooms"])
+
+            property_types = preset.get("property_types")
+            if property_types:
+                conditions.append("p.property_type = ANY(%s)")
+                params.append(property_types)
+
+            neighborhood = preset.get("neighborhood")
+            if neighborhood and neighborhood.strip():
+                try:
+                    hood_ids = [int(x.strip()) for x in neighborhood.split(",") if x.strip().isdigit()]
+                    if hood_ids:
+                        conditions.append("p.hood_id = ANY(%s)")
+                        params.append(hood_ids)
+                except (ValueError, AttributeError):
+                    pass
+
+            where_clause = " AND ".join(conditions)
+
+            # 4. Count total
+            await cur.execute(
+                f"""
+                SELECT COUNT(*) AS total
+                FROM properties p
+                LEFT JOIN property_classifications pc ON pc.property_id = p.id
+                LEFT JOIN blacklist bl ON bl.property_id = p.id
+                WHERE {where_clause}
+                """,
+                tuple(params),
+            )
+            total_row = await cur.fetchone()
+            total = total_row["total"] if total_row else 0
+
+            # 5. Fetch paginated results
+            offset = (page - 1) * per_page
+            params_with_pagination = params + [per_page, offset]
+
+            await cur.execute(
+                f"""
+                SELECT
+                    p.*,
+                    pc.classification,
+                    pc.signal_details,
+                    (
+                        SELECT ARRAY_AGG(DISTINCT p2.source)
+                        FROM property_matches pm
+                        JOIN properties p2 ON p2.id = CASE
+                            WHEN pm.property_id_a = p.id THEN pm.property_id_b
+                            ELSE pm.property_id_a END
+                        WHERE pm.property_id_a = p.id OR pm.property_id_b = p.id
+                    ) AS matched_sources
+                FROM properties p
+                LEFT JOIN property_classifications pc ON pc.property_id = p.id
+                LEFT JOIN blacklist bl ON bl.property_id = p.id
+                WHERE {where_clause}
+                ORDER BY
+                    COALESCE(p.days_on_market, 0) DESC,
+                    p.updated_at DESC
+                LIMIT %s OFFSET %s
+                """,
+                tuple(params_with_pagination),
+            )
+            rows = await cur.fetchall()
+
+    return {
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "properties": [dict(r) for r in rows],
+    }
 
 
 @router.get("/api/presets/{preset_id}/stats")
@@ -277,6 +430,33 @@ async def toggle_preset(preset_id: int):
     return dict(row)
 
 
+@router.post("/api/presets/{preset_id}/clone")
+async def clone_preset(preset_id: int):
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT * FROM search_presets WHERE id = %s", (preset_id,))
+            original = await cur.fetchone()
+            if not original:
+                raise HTTPException(status_code=404, detail="Preset not found")
+            extra_params_json = json.dumps(original['extra_params']) if original['extra_params'] else None
+            await cur.execute(
+                """INSERT INTO search_presets
+                   (name, category, city_code, area_code, neighborhood, property_types,
+                    min_price, max_price, min_rooms, max_rooms, extra_params, is_active)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   RETURNING *""",
+                (f"{original['name']} (copy)", original['category'], original['city_code'],
+                 original['area_code'], original['neighborhood'], original['property_types'],
+                 original['min_price'], original['max_price'], original['min_rooms'],
+                 original['max_rooms'],
+                 extra_params_json,
+                 True)
+            )
+            row = await cur.fetchone()
+        await conn.commit()
+    return dict(row)
+
+
 # ---------------------------------------------------------------------------
 # Scan
 # ---------------------------------------------------------------------------
@@ -362,16 +542,33 @@ async def trigger_open_scan(body: OpenSearchBody):
     return result
 
 
-@router.post("/api/scan/{preset_id}")
-async def trigger_scan(preset_id: int):
+async def _run_scan_background(preset_id: int) -> None:
+    """Background wrapper for per-preset scan — uses the same lock as scheduled scans."""
+    import time as _time
+    import pdis.scanner as _scanner
+    global_running = _scanner.get_scan_status()
+    if global_running["running"]:
+        logger.warning("api.scan_skipped_already_running", preset_id=preset_id)
+        return
+    _scanner._scan_running = True
+    _scanner._scan_started_at = _time.time()
     try:
-        result = await run_scan(preset_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        await run_scan(preset_id)
     except Exception as exc:
-        logger.error("api.scan_error", preset_id=preset_id, error=str(exc))
-        raise HTTPException(status_code=500, detail=str(exc))
-    return result
+        logger.error("api.scan_background_error", preset_id=preset_id, error=str(exc))
+    finally:
+        _scanner._scan_running = False
+        _scanner._scan_started_at = None
+
+
+@router.post("/api/scan/{preset_id}")
+async def trigger_scan(preset_id: int, background_tasks: BackgroundTasks):
+    from pdis.scanner import get_scan_status
+    status = get_scan_status()
+    if status["running"]:
+        raise HTTPException(status_code=409, detail="Scan already in progress")
+    background_tasks.add_task(_run_scan_background, preset_id)
+    return {"status": "started", "preset_id": preset_id}
 
 
 @router.get("/api/scan/sessions")

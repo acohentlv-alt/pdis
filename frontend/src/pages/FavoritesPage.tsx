@@ -81,7 +81,6 @@ export default function FavoritesPage() {
   const [tab, setTab] = useState<Tab>('favorites');
   const [neighborhoods, setNeighborhoods] = useState<string[]>([]);
   const [selectedRooms, setSelectedRooms] = useState<string[]>([]);
-  const [classification, setClassification] = useState('');
   const [source, setSource] = useState('');
   const [sortBy, setSortBy] = useState('distress_score');
   const [keyword, setKeyword] = useState('');
@@ -187,13 +186,10 @@ export default function FavoritesPage() {
         setNeighborhoods={setNeighborhoods}
         selectedRooms={selectedRooms}
         setSelectedRooms={setSelectedRooms}
-        classification={classification}
-        setClassification={setClassification}
         source={source}
         setSource={setSource}
         sortBy={sortBy}
         setSortBy={setSortBy}
-        showClassificationFilter={false}
         keyword={keyword}
         setKeyword={setKeyword}
         minPriceSqm={minPriceSqm}

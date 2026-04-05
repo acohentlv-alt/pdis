@@ -174,6 +174,29 @@ export function useTogglePreset() {
   });
 }
 
+export function useClonePreset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) =>
+      apiFetch(`/api/presets/${id}/clone`, { method: 'POST' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['presets'] }),
+  });
+}
+
+export function useScanPreset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) =>
+      apiFetch(`/api/scan/${id}`, { method: 'POST' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['presets'] });
+      qc.invalidateQueries({ queryKey: ['presetProperties'] });
+      qc.invalidateQueries({ queryKey: ['stats'] });
+      qc.invalidateQueries({ queryKey: ['presetStats'] });
+    },
+  });
+}
+
 export function useSaveOperatorInput(yad2Id: string) {
   const qc = useQueryClient();
   return useMutation({

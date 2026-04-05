@@ -91,6 +91,16 @@ export function useOpenSearchPresets() {
   });
 }
 
+export function usePresetProperties(presetId: number | null) {
+  return useQuery({
+    queryKey: ['presetProperties', presetId],
+    queryFn: () => apiFetch<{ total: number; properties: Record<string, unknown>[] }>(
+      `/api/presets/${presetId}/properties?per_page=2000`
+    ),
+    enabled: presetId !== null && presetId > 0,
+  });
+}
+
 export function usePropertiesByPreset(presetId: number | null) {
   return useQuery({
     queryKey: ['propertiesByPreset', presetId],
@@ -161,5 +171,23 @@ export function usePropertySearch(query: string, category?: string) {
     queryKey: ['propertySearch', query, category],
     queryFn: () => apiFetch<{ properties: Record<string, unknown>[] }>(`/api/properties/search?${params}`),
     enabled: query.length >= 2,
+  });
+}
+
+export function useScanStatus() {
+  return useQuery({
+    queryKey: ['scanStatus'],
+    queryFn: () => apiFetch<{ running: boolean }>('/api/scan/status'),
+    refetchInterval: 10000,
+  });
+}
+
+export function useNeighborhoods(cityCode: string | null) {
+  return useQuery({
+    queryKey: ['neighborhoods', cityCode],
+    queryFn: () => apiFetch<{ neighborhoods: { hood_id: number; neighborhood: string; listing_count: number }[] }>(
+      `/api/neighborhoods?city_code=${cityCode}`
+    ),
+    enabled: cityCode !== null && cityCode !== '',
   });
 }

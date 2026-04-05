@@ -335,8 +335,8 @@ async def _record_preset_stats(preset_id: int, session_id: int) -> None:
 
 
 async def _backfill_built_sqm(listings: list[ScrapedListing], log) -> None:
-    """Fetch square_meter_build from Yad2 detail API for properties missing it."""
-    # Find yad2_ids that don't have square_meter_build yet
+    """Fetch square_meter_build and description from Yad2 detail API for properties missing them."""
+    # Find yad2_ids that are missing square_meter_build OR have a short/missing description
     yad2_ids = [l.yad2_id for l in listings if l.source == "yad2"]
     if not yad2_ids:
         return
@@ -345,7 +345,12 @@ async def _backfill_built_sqm(listings: list[ScrapedListing], log) -> None:
         async with conn.cursor() as cur:
             await cur.execute(
                 """SELECT yad2_id FROM properties
-                   WHERE yad2_id = ANY(%s) AND square_meter_build IS NULL""",
+                   WHERE yad2_id = ANY(%s)
+                   AND (
+                       square_meter_build IS NULL
+                       OR description IS NULL
+                       OR LENGTH(description) < 30
+                   )""",
                 (yad2_ids,),
             )
             missing = [r["yad2_id"] for r in await cur.fetchall()]
@@ -353,26 +358,34 @@ async def _backfill_built_sqm(listings: list[ScrapedListing], log) -> None:
     if not missing:
         return
 
-    log.info("scanner.fetching_built_sqm", count=len(missing))
+    log.info("scanner.fetching_detail", count=len(missing))
     updated = 0
     for yad2_id in missing:
         detail = await asyncio.to_thread(fetch_item_detail, yad2_id)
-        if detail and detail.get("square_meter_build") is not None:
-            try:
-                build_sqm = int(detail["square_meter_build"])
+        if detail:
+            updates = {}
+            if detail.get("square_meter_build") is not None:
+                try:
+                    updates["square_meter_build"] = int(detail["square_meter_build"])
+                except (ValueError, TypeError):
+                    pass
+            if detail.get("info_text"):
+                updates["description"] = detail["info_text"]
+
+            if updates:
+                set_clause = ", ".join(f"{k} = %s" for k in updates)
+                values = list(updates.values()) + [yad2_id]
                 async with _db.pool.connection() as conn:
                     async with conn.cursor() as cur:
                         await cur.execute(
-                            "UPDATE properties SET square_meter_build = %s WHERE yad2_id = %s",
-                            (build_sqm, yad2_id),
+                            f"UPDATE properties SET {set_clause} WHERE yad2_id = %s",
+                            values,
                         )
                     await conn.commit()
                 updated += 1
-            except (ValueError, TypeError):
-                pass
         await asyncio.sleep(0.3)  # rate limit
 
-    log.info("scanner.built_sqm_filled", updated=updated, total=len(missing))
+    log.info("scanner.detail_filled", updated=updated, total=len(missing))
 
 
 async def run_scan(preset_id: int) -> dict:

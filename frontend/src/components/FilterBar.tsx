@@ -6,13 +6,10 @@ interface FilterBarProps {
   setNeighborhoods: (v: string[]) => void;
   selectedRooms: string[];
   setSelectedRooms: (v: string[]) => void;
-  classification: string;
-  setClassification: (v: string) => void;
   source: string;
   setSource: (v: string) => void;
   sortBy: string;
   setSortBy: (v: string) => void;
-  showClassificationFilter: boolean;
   keyword: string;
   setKeyword: (v: string) => void;
   minPriceSqm: string;
@@ -33,13 +30,10 @@ export default function FilterBar({
   setNeighborhoods,
   selectedRooms,
   setSelectedRooms,
-  classification,
-  setClassification,
   source,
   setSource,
   sortBy,
   setSortBy,
-  showClassificationFilter,
   keyword,
   setKeyword,
   minPriceSqm,
@@ -131,19 +125,6 @@ export default function FilterBar({
           <option value="yad2">Yad2</option>
           <option value="madlan">Madlan</option>
         </select>
-
-        {showClassificationFilter && (
-          <select
-            value={classification}
-            onChange={e => setClassification(e.target.value)}
-            className="flex-1 min-w-[100px] border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
-          >
-            <option value="">All classes</option>
-            <option value="hot">Hot</option>
-            <option value="warm">Warm</option>
-            <option value="cold">Cold</option>
-          </select>
-        )}
 
         <select
           value={sortBy}

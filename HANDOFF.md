@@ -1,54 +1,55 @@
-# HANDOFF — April 5, 2026
+# HANDOFF — April 5, 2026 (Evening Session)
 
 ---
 
 ## What we did today
 
-Major feature day + deployment. Golden preset with 9 premium TLV neighborhoods auto-filtering opportunities. Built sqm (square_meter_build) from Yad2 detail API for accurate NIS/sqm calculations. My Listings page with 3 tabs (Favorites/Whitelist/Blacklist). Classification badge tooltips showing signal reasons on hover. Price drop badge shows date and percentage on hover. Removed move_in_urgent (noise signal). "New" badge for today's discoveries. Greeting header. Fixed favorite button on detail page. Fixed stale price drop classifications. Created GitHub repo and deployed to Render.
+Major UX overhaul: replaced the old Rent/Buy tab navigation with a preset-pill-based dashboard. Shechter now sees all his search presets as scrollable pills at the top, taps one to see its properties. Property cards redesigned with money first (big price + NIS/m²), then specs (rooms, floor, elevator ✓/✗, parking ✓/✗), then description preview. Removed Hot/Warm/Cold classification entirely — Shechter reads the individual signals himself. Fixed false relisting detection. Built neighborhood picker with real names instead of numeric IDs. Created 3 new presets matching Shechter's exact investment criteria.
 
 ---
 
 ## What's live
 
-### Production deployment
+### Production
 - **App:** https://pdis-lsah.onrender.com
-- **Repo:** https://github.com/acohentlv-alt/pdis (private)
-- **Database:** Neon (cloud PostgreSQL)
-- **Auto-deploy:** Push to main → Render rebuilds automatically
-- **Scheduled scans:** cron-job.org, 08:00 + 18:00 Israel time, POST /api/scan/scheduled with Bearer token
+- **Repo:** github.com/acohentlv-alt/pdis
+- **Scheduled scans:** cron-job.org, 08:00 + 18:00 Israel time
 
-### Three presets active
-- TLV Rent - Golden (ID=7): 9 premium neighborhoods, property_condition=5
-- TLV Rent - Full Scan (ID=8): all Tel Aviv rentals
-- Haifa Buy (ID=9): all Haifa properties for sale
+### Six presets active
+- TLV Rent - Golden (ID=7): 9 premium neighborhoods, condition=5
+- TLV Rent - Full Scan (ID=8): all TLV rentals
+- Haifa Buy (ID=9): all Haifa for sale
+- Haifa Buy - Small Apts (ID=11): 1-2.5 rooms, under 400K, 4 neighborhoods
+- Haifa Buy - Buildings (ID=12): house/land types
+- TLV Rent - Villas (ID=13): house/cottage, 180m²+, 15-30K
 
 ---
 
 ## What's half-done
 
-### Scheduled scans not yet verified
-Cron jobs created at cron-job.org but haven't fired yet. Need to verify the first automated scan at 18:00 Israel time triggers correctly and data refreshes on the live site.
+### Description backfill
+Scanner now captures `info_text` from Yad2 detail API as description. ~450 existing properties still have placeholder descriptions (just street names). They'll be backfilled on next scan run automatically.
 
-### Yad2 neighborhood filter doesn't work server-side
-The `neighborhood` API parameter is ignored by Yad2 (same as `propertyCondition`). Golden preset scans all of TLV; filtering happens client-side in the UI. This means scans fetch ~240 listings from all neighborhoods, not just golden ones.
+### Relisting data is historically inflated
+Fixed the logic going forward (no more false relistings from scan gaps), but existing signal_details still have inflated relisting_count values. The "Reappeared" stat card shows high numbers. Will correct over time as signals are recomputed on future scans.
 
 ---
 
 ## What to do next
 
-**First:** Verify scheduled scans work at 18:00 Israel time today. Check Render logs for scan activity.
+**First:** Verify on production that everything works — preset pills, switching, neighborhood picker, card layout, description display.
 
-**Second:** Telegram bot — send alerts when new hot properties are detected after a scan.
+**Second:** Run a scan to backfill descriptions for existing properties. Check that `info_text` gets saved correctly.
 
-**Third:** Classification threshold tuning once more data accumulates.
+**Third:** Telegram bot for scan alerts.
 
 ---
 
 ## Watch out for
 
-- **Render free tier:** Service sleeps after 15 min of inactivity. First request after sleep takes ~30 seconds (cold start). Cron job will wake it up for scans.
-- **DATABASE_URL paste issue:** Render's env var text field wraps long URLs and inserts line breaks. Use `pbcopy` to clipboard-copy, or upload via .env file button.
-- **Built sqm backfill:** New properties get square_meter_build automatically during scan (detail API fetch). Existing properties without it need a one-time backfill (already done for ~700).
-- **Golden auto-filter:** Only applies on /rent opportunities tab, not when clicking stat cards (Price Drops, Reappeared). Stat clicks clear all filters to show global results.
-- **Stat card numbers are global:** They count ALL neighborhoods, not just golden-filtered ones. Clicking a stat shows all matching properties.
-- **All previous watch-outs still apply** (English UI, hooks before returns, route ordering, no numeric scores, condition keywords use phrases not root words).
+- **per_page=2000**: Frontend fetches up to 2000 properties per preset. If a preset grows beyond this, results will be truncated. Monitor preset 8 (Full Scan TLV) which currently has 950.
+- **Neighborhood picker depends on existing data**: The checkbox list shows neighborhoods that have properties in the DB. New neighborhoods only appear after a scan finds properties there.
+- **City code mapping is indirect**: Presets store city_code (5000=TLV, 4000=Haifa) but properties don't have city_code — matching works via preset_id chain. Properties with preset_id=NULL are included via OR clause.
+- **Classification still exists in backend**: The hot/warm/cold classification is still computed during scans and stored in DB. It's just hidden from the UI. If Alan ever wants it back, the data is there.
+- **Run Now is now async**: POST /api/scan/{preset_id} returns immediately and runs in background. Uses the _scan_running lock to prevent collisions.
+- **All previous watch-outs still apply**: English UI, hooks before returns, route ordering, Render cold start.
