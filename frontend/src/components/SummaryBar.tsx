@@ -21,12 +21,12 @@ function StatCard({ label, value, onClick, active }: StatCardProps) {
   return (
     <div
       onClick={onClick}
-      className={`flex-1 rounded-lg shadow py-3 px-2 flex flex-col items-center justify-center min-w-0 ${
+      className={`flex-1 basis-0 rounded-lg shadow py-3 px-1 flex flex-col items-center justify-center ${
         onClick ? 'cursor-pointer hover:shadow-md transition-all' : ''
       } ${active ? 'bg-gray-900' : 'bg-white'}`}
     >
-      <div className={`text-xl font-bold text-center ${active ? 'text-white' : 'text-gray-900'}`}>{value}</div>
-      <div className={`text-xs mt-1 text-center truncate w-full ${active ? 'text-gray-300' : 'text-gray-500'}`}>{label}</div>
+      <div className={`text-xl font-bold ${active ? 'text-white' : 'text-gray-900'}`}>{value}</div>
+      <div className={`text-[10px] leading-tight mt-1 ${active ? 'text-gray-300' : 'text-gray-500'}`}>{label}</div>
     </div>
   );
 }
