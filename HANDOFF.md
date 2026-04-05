@@ -1,10 +1,10 @@
-# HANDOFF — April 5, 2026 (Evening Session)
+# HANDOFF — April 5, 2026 (Late Night Session)
 
 ---
 
 ## What we did today
 
-Major UX overhaul: replaced the old Rent/Buy tab navigation with a preset-pill-based dashboard. Shechter now sees all his search presets as scrollable pills at the top, taps one to see its properties. Property cards redesigned with money first (big price + NIS/m²), then specs (rooms, floor, elevator ✓/✗, parking ✓/✗), then description preview. Removed Hot/Warm/Cold classification entirely — Shechter reads the individual signals himself. Fixed false relisting detection. Built neighborhood picker with real names instead of numeric IDs. Created 3 new presets matching Shechter's exact investment criteria.
+Continued from the evening session. Fixed two UX issues: (1) Preset Manager screen now scrolls fully to the last preset — the bottom nav bar was overlapping, fixed by bumping z-index and adding padding. (2) Default sort is now "longest on market first, then most signals as tiebreaker" — combined into a single "Market time + Signals" dropdown option. Ran QA via Playwright against local to verify both changes. Pushed to main for Render deploy.
 
 ---
 
@@ -28,18 +28,18 @@ Major UX overhaul: replaced the old Rent/Buy tab navigation with a preset-pill-b
 ## What's half-done
 
 ### Description backfill
-Scanner now captures `info_text` from Yad2 detail API as description. ~450 existing properties still have placeholder descriptions (just street names). They'll be backfilled on next scan run automatically.
+Scanner now captures `info_text` from Yad2 detail API as description. ~450 existing properties still have placeholder descriptions. They'll be backfilled on next scan run automatically.
 
 ### Relisting data is historically inflated
-Fixed the logic going forward (no more false relistings from scan gaps), but existing signal_details still have inflated relisting_count values. The "Reappeared" stat card shows high numbers. Will correct over time as signals are recomputed on future scans.
+Fixed the logic going forward but existing signal_details still have inflated relisting_count values. Will correct over time as signals are recomputed on future scans.
 
 ---
 
 ## What to do next
 
-**First:** Verify on production that everything works — preset pills, switching, neighborhood picker, card layout, description display.
+**First:** Verify on production that the two changes deployed correctly — preset manager scrolls to bottom, sort shows "Market time + Signals" as default.
 
-**Second:** Run a scan to backfill descriptions for existing properties. Check that `info_text` gets saved correctly.
+**Second:** Trigger a scan to backfill descriptions for existing properties.
 
 **Third:** Telegram bot for scan alerts.
 
@@ -47,9 +47,15 @@ Fixed the logic going forward (no more false relistings from scan gaps), but exi
 
 ## Watch out for
 
-- **per_page=2000**: Frontend fetches up to 2000 properties per preset. If a preset grows beyond this, results will be truncated. Monitor preset 8 (Full Scan TLV) which currently has 950.
-- **Neighborhood picker depends on existing data**: The checkbox list shows neighborhoods that have properties in the DB. New neighborhoods only appear after a scan finds properties there.
-- **City code mapping is indirect**: Presets store city_code (5000=TLV, 4000=Haifa) but properties don't have city_code — matching works via preset_id chain. Properties with preset_id=NULL are included via OR clause.
-- **Classification still exists in backend**: The hot/warm/cold classification is still computed during scans and stored in DB. It's just hidden from the UI. If Alan ever wants it back, the data is there.
-- **Run Now is now async**: POST /api/scan/{preset_id} returns immediately and runs in background. Uses the _scan_running lock to prevent collisions.
+- **Preset pills are horizontal scroll** — Alan likes this design. Don't change to wrapped/vertical layout.
+- **Sort logic:** "Market time + Signals" is the agreed default — days_on_market DESC, then signal count DESC as tiebreaker. Don't separate these into two dropdown options.
+- **PresetManager z-index is z-[60]** — bumped above NavBar (z-50) so the bottom nav doesn't poke through. If other modals are added, keep z-index hierarchy in mind.
+- **per_page=2000**: Frontend fetches up to 2000 properties per preset. Monitor preset 8 (Full Scan TLV) which currently has 950+.
 - **All previous watch-outs still apply**: English UI, hooks before returns, route ordering, Render cold start.
+
+---
+
+## Test these
+
+- Preset Manager: open on mobile, scroll to bottom — "TLV Rent - Villas" should have clear space below it, no nav bar overlap
+- Sort dropdown: should show "Market time + Signals" by default, cards sorted by longest on market first
