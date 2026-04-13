@@ -103,7 +103,7 @@ async def compute_signals_batch(property_ids: list[int]) -> dict[int, dict]:
             await cur.execute(
                 """SELECT id, days_on_market, price, description,
                           move_in_date, square_meters, square_meter_build, neighborhood, is_agent, renovated, category,
-                          hood_id, year_built, floor, elevator
+                          hood_id, year_built, floor, elevator, parking, safe_room
                    FROM properties
                    WHERE id = ANY(%s)""",
                 (property_ids,),
