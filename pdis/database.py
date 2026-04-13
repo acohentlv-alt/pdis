@@ -385,6 +385,36 @@ async def run_migrations() -> None:
                   ON neighborhood_thresholds(neighborhood, hood_id, category)
             """)
 
+            # Building metadata: cached year_built per normalized address
+            await cur.execute("""
+                CREATE TABLE IF NOT EXISTS building_metadata (
+                    id                  SERIAL PRIMARY KEY,
+                    city_norm           TEXT NOT NULL,
+                    street_norm         TEXT NOT NULL,
+                    house_number_norm   TEXT NOT NULL,
+                    year_built          INTEGER,
+                    source              TEXT NOT NULL,
+                    confidence          REAL DEFAULT 1.0,
+                    raw_lat             REAL,
+                    raw_lon             REAL,
+                    created_at          TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at          TIMESTAMPTZ DEFAULT NOW(),
+                    CONSTRAINT building_metadata_unique_addr
+                      UNIQUE (city_norm, street_norm, house_number_norm),
+                    CONSTRAINT building_metadata_year_sane
+                      CHECK (year_built IS NULL OR (year_built >= 1850 AND year_built <= 2050)),
+                    CONSTRAINT building_metadata_source_valid
+                      CHECK (source IN ('tlv_municipality', 'madlan_cache', 'manual'))
+                )
+            """)
+            await cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_building_metadata_lookup
+                  ON building_metadata(city_norm, street_norm, house_number_norm)
+            """)
+            await cur.execute("""
+                ALTER TABLE properties ADD COLUMN IF NOT EXISTS year_built INTEGER
+            """)
+
             # Add FB columns to properties
             for col_def in ["author_name TEXT", "group_url TEXT", "like_count INTEGER"]:
                 await cur.execute(f"ALTER TABLE properties ADD COLUMN IF NOT EXISTS {col_def}")

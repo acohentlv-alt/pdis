@@ -7,3 +7,4 @@ psycopg-pool>=3.2
 curl-cffi>=0.14
 structlog>=24.0
 python-dotenv>=1.0
+shapely>=2.0

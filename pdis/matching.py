@@ -2,6 +2,7 @@
 import math
 import structlog
 import pdis.database as _db
+from psycopg.rows import dict_row
 
 logger = structlog.get_logger(__name__)
 
@@ -505,3 +506,79 @@ async def detect_customer_relistings(session_id: int) -> int:
 
     logger.info("matching.customer_relistings", session_id=session_id, count=inserted)
     return inserted
+
+
+async def backfill_year_built_from_buildings(property_ids: list[int]) -> int:
+    """For properties with NULL year_built, look up normalized address in building_metadata
+    and copy year if found. Returns count updated."""
+    from pdis.signals import _normalize_address
+    if not property_ids:
+        return 0
+    async with _db.pool.connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """SELECT id, address_city, address_street, address_home_number, year_built
+                   FROM properties WHERE id = ANY(%s)""",
+                (property_ids,),
+            )
+            props = await cur.fetchall()
+            updates = []
+            for p in props:
+                if p["year_built"] is not None:
+                    continue
+                c, s, h = _normalize_address(p["address_city"], p["address_street"], p["address_home_number"])
+                if not (c and s and h):
+                    continue
+                await cur.execute(
+                    """SELECT year_built FROM building_metadata
+                       WHERE city_norm = %s AND street_norm = %s AND house_number_norm = %s
+                         AND year_built IS NOT NULL""",
+                    (c, s, h),
+                )
+                row = await cur.fetchone()
+                if row:
+                    updates.append((row["year_built"], p["id"]))
+            for year, pid in updates:
+                await cur.execute(
+                    "UPDATE properties SET year_built = %s, updated_at = NOW() WHERE id = %s",
+                    (year, pid),
+                )
+        await conn.commit()
+    logger.info("matching.year_built_backfilled_from_buildings", count=len(updates))
+    return len(updates)
+
+
+async def backfill_year_built_from_matches(property_ids: list[int]) -> int:
+    """For properties with NULL year_built, check confirmed property_matches to other properties
+    that have year_built. Copy over. Returns count updated."""
+    if not property_ids:
+        return 0
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """WITH targets AS (
+                    SELECT id FROM properties
+                    WHERE id = ANY(%s) AND year_built IS NULL
+                ),
+                matched AS (
+                    SELECT t.id AS target_id, p_other.year_built
+                    FROM targets t
+                    JOIN property_matches m
+                      ON (m.property_id_a = t.id OR m.property_id_b = t.id)
+                     AND m.is_confirmed = TRUE
+                    JOIN properties p_other
+                      ON p_other.id = CASE WHEN m.property_id_a = t.id
+                                           THEN m.property_id_b ELSE m.property_id_a END
+                    WHERE p_other.year_built IS NOT NULL
+                )
+                UPDATE properties p
+                   SET year_built = m.year_built, updated_at = NOW()
+                  FROM (SELECT DISTINCT ON (target_id) target_id, year_built
+                        FROM matched ORDER BY target_id, year_built DESC) m
+                 WHERE p.id = m.target_id""",
+                (property_ids,),
+            )
+            count = cur.rowcount
+        await conn.commit()
+    logger.info("matching.year_built_backfilled_from_matches", count=count)
+    return count

@@ -35,6 +35,8 @@ query($sq: SearchBulletinQueryInput!) {
       }
       parking sellerType generalCondition
       images { imageUrl }
+      buildingYear yearBuilt year_built buildYear constructionYear
+      additionalDetails
     }
   }
 }
@@ -247,6 +249,20 @@ def _parse_madlan_listing(bulletin: dict, category: str) -> ScrapedListing | Non
     address_city = addr.get("city") or None
     neighborhood = addr.get("neighbourhood") or None
 
+    # Year built — try multiple candidate field names (Madlan field name unconfirmed;
+    # candidates: buildingYear, yearBuilt, year_built, buildYear, constructionYear)
+    year_built_madlan = None
+    for candidate in ("buildingYear", "yearBuilt", "year_built", "buildYear", "constructionYear"):
+        v = bulletin.get(candidate) or (bulletin.get("additionalDetails") or {}).get(candidate)
+        if v:
+            try:
+                yi = int(v)
+                if 1850 <= yi <= 2050:
+                    year_built_madlan = yi
+                    break
+            except (TypeError, ValueError):
+                pass
+
     # customer_id
     agent_id = bulletin.get("agentId")
     office_id = bulletin.get("officeId")
@@ -265,6 +281,7 @@ def _parse_madlan_listing(bulletin: dict, category: str) -> ScrapedListing | Non
         rooms=rooms,
         floor=floor,
         total_floors=total_floors,
+        year_built=year_built_madlan,
         square_meters=square_meters,
         price=price,
         currency="ILS",

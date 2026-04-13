@@ -85,7 +85,8 @@ async def _upsert_properties(
                         pets_allowed, furnished, air_conditioning,
                         is_agent, agent_office, move_in_date,
                         hood_id, customer_id, accessibility,
-                        author_name, group_url, like_count
+                        author_name, group_url, like_count,
+                        year_built
                     ) VALUES (
                         %(yad2_id)s, %(preset_id)s, %(category)s,
                         %(address_street)s, %(address_city)s, %(neighborhood)s,
@@ -100,7 +101,8 @@ async def _upsert_properties(
                         %(pets_allowed)s, %(furnished)s, %(air_conditioning)s,
                         %(is_agent)s, %(agent_office)s, %(move_in_date)s,
                         %(hood_id)s, %(customer_id)s, %(accessibility)s,
-                        %(author_name)s, %(group_url)s, %(like_count)s
+                        %(author_name)s, %(group_url)s, %(like_count)s,
+                        %(year_built)s
                     )
                     ON CONFLICT (yad2_id) DO UPDATE SET
                         price           = EXCLUDED.price,
@@ -145,7 +147,8 @@ async def _upsert_properties(
                         accessibility   = EXCLUDED.accessibility,
                         author_name     = COALESCE(EXCLUDED.author_name, properties.author_name),
                         group_url       = COALESCE(EXCLUDED.group_url, properties.group_url),
-                        like_count      = COALESCE(EXCLUDED.like_count, properties.like_count)
+                        like_count      = COALESCE(EXCLUDED.like_count, properties.like_count),
+                        year_built      = COALESCE(EXCLUDED.year_built, properties.year_built)
                     RETURNING (xmax = 0) AS is_insert
                     """,
                     {
@@ -191,6 +194,7 @@ async def _upsert_properties(
                         "author_name": listing.author_name,
                         "group_url": listing.group_url,
                         "like_count": listing.like_count,
+                        "year_built": listing.year_built,
                     },
                 )
                 row = await cur.fetchone()
@@ -396,6 +400,49 @@ async def _backfill_built_sqm(listings: list[ScrapedListing], log) -> None:
     log.info("scanner.detail_filled", updated=updated, total=len(missing))
 
 
+async def _cache_madlan_years(listings: list[ScrapedListing]) -> None:
+    """Cache year_built values from Madlan listings into building_metadata.
+    TLV municipality data always wins (CASE clause in ON CONFLICT preserves it).
+    """
+    from pdis.signals import _normalize_address
+    rows = []
+    for listing in listings:
+        if listing.year_built is None:
+            continue
+        c, s, h = _normalize_address(listing.address_city, listing.address_street, listing.address_home_number)
+        if not (c and s and h):
+            continue
+        rows.append((c, s, h, listing.year_built, listing.latitude, listing.longitude))
+
+    if not rows:
+        return
+
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            for c, s, h, year, lat, lon in rows:
+                await cur.execute(
+                    """INSERT INTO building_metadata
+                       (city_norm, street_norm, house_number_norm, year_built, source, raw_lat, raw_lon, updated_at)
+                       VALUES (%s, %s, %s, %s, 'madlan_cache', %s, %s, NOW())
+                       ON CONFLICT (city_norm, street_norm, house_number_norm) DO UPDATE SET
+                           year_built = CASE
+                               WHEN building_metadata.source = 'tlv_municipality' THEN building_metadata.year_built
+                               ELSE EXCLUDED.year_built
+                           END,
+                           source = CASE
+                               WHEN building_metadata.source = 'tlv_municipality' THEN 'tlv_municipality'
+                               ELSE 'madlan_cache'
+                           END,
+                           raw_lat = COALESCE(EXCLUDED.raw_lat, building_metadata.raw_lat),
+                           raw_lon = COALESCE(EXCLUDED.raw_lon, building_metadata.raw_lon),
+                           updated_at = NOW()""",
+                    (c, s, h, year, lat, lon),
+                )
+        await conn.commit()
+
+    logger.info("scanner.madlan_years_cached", count=len(rows))
+
+
 async def run_scan(preset_id: int) -> dict:
     """
     Run a full scan for a single preset.
@@ -456,28 +503,37 @@ async def run_scan(preset_id: int) -> dict:
             blocked=result.was_blocked,
         )
 
+        # Cache Madlan year_built values into building_metadata
+        if _source == "madlan":
+            await _cache_madlan_years(result.listings)
+
         # Fetch square_meter_build from detail API for properties that don't have it
         if _source == "yad2":
             await _backfill_built_sqm(result.listings, log)
 
         from pdis.events import detect_events
         from pdis.classification import classify_batch
+        from pdis.matching import find_matches, detect_customer_relistings, backfill_year_built_from_matches, backfill_year_built_from_buildings
 
         # Detect events by comparing to previous snapshots
         event_count = await detect_events(session_id, preset_id)
         log.info("scanner.events_detected", count=event_count)
 
-        # Classify all properties seen in this scan
-        property_ids = await _get_property_ids_for_session(session_id)
-        if property_ids:
-            await classify_batch(property_ids)
-            log.info("scanner.classified", count=len(property_ids))
-
-        # Find property matches
-        from pdis.matching import find_matches, detect_customer_relistings
+        # Find property matches (before classification so year backfills can use confirmed matches)
         match_count = await find_matches(session_id)
         if match_count > 0:
             log.info("scanner.matches_found", count=match_count)
+
+        # Backfill year_built from matches and building_metadata before classification
+        property_ids = await _get_property_ids_for_session(session_id)
+        if property_ids:
+            await backfill_year_built_from_matches(property_ids)
+            await backfill_year_built_from_buildings(property_ids)
+
+        # Classify all properties seen in this scan (after year backfills)
+        if property_ids:
+            await classify_batch(property_ids)
+            log.info("scanner.classified", count=len(property_ids))
 
         relist_count = await detect_customer_relistings(session_id)
         if relist_count > 0:
@@ -612,19 +668,26 @@ async def run_scan_from_listings(preset_id: int, listings: list[ScrapedListing])
 
         from pdis.events import detect_events
         from pdis.classification import classify_batch
-        from pdis.matching import find_matches, detect_customer_relistings
+        from pdis.matching import find_matches, detect_customer_relistings, backfill_year_built_from_matches, backfill_year_built_from_buildings
 
         event_count = await detect_events(session_id, preset_id)
         log.info("scanner.fb_events_detected", count=event_count)
 
-        property_ids = await _get_property_ids_for_session(session_id)
-        if property_ids:
-            await classify_batch(property_ids)
-            log.info("scanner.fb_classified", count=len(property_ids))
-
+        # Find property matches (before classification so year backfills can use confirmed matches)
         match_count = await find_matches(session_id)
         if match_count > 0:
             log.info("scanner.fb_matches_found", count=match_count)
+
+        # Backfill year_built from matches and building_metadata before classification
+        property_ids = await _get_property_ids_for_session(session_id)
+        if property_ids:
+            await backfill_year_built_from_matches(property_ids)
+            await backfill_year_built_from_buildings(property_ids)
+
+        # Classify all properties seen in this scan (after year backfills)
+        if property_ids:
+            await classify_batch(property_ids)
+            log.info("scanner.fb_classified", count=len(property_ids))
 
         relist_count = await detect_customer_relistings(session_id)
         if relist_count > 0:

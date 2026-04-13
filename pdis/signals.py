@@ -1,4 +1,6 @@
 """Distress signal calculator — batch mode, tier-based."""
+import re
+import unicodedata
 from datetime import date, timedelta
 
 import structlog
@@ -6,6 +8,56 @@ import structlog
 import pdis.database as _db
 
 logger = structlog.get_logger(__name__)
+
+
+def _year_band(year: int | None) -> str:
+    """Year-built band for Amit Fit adjustment. NULL falls back to 'mid' (0% adj)."""
+    if year is None:
+        return "mid"
+    if year < 1960:
+        return "old"
+    if year < 1990:
+        return "mid_old"
+    if year < 2010:
+        return "mid"
+    return "new"
+
+
+_YEAR_ADJUSTMENT = {
+    "old":     -0.18,   # < 1960
+    "mid_old": -0.08,   # 1960-1989
+    "mid":      0.00,   # 1990-2009 (and fallback for unknown)
+    "new":      0.05,   # >= 2010
+}
+
+
+def _floor_adjustment(floor: int | None, has_elevator: bool | None) -> float:
+    """Floor 1 = 0% (barely a walk-up). Floor 2 = -3%. Cap at -15%.
+    If elevator is True, no penalty regardless of floor."""
+    if floor is None or floor <= 1:
+        return 0.0
+    if has_elevator:
+        return 0.0
+    penalty = max(0, floor - 1) * -0.03
+    return max(penalty, -0.15)
+
+
+def _normalize_address(city, street, house_number) -> tuple[str, str, str]:
+    """Normalize address triple. city: NFKC + hyphen->space + collapse whitespace.
+    street: NFKC + whitespace. house_number: leading digits only."""
+    def _nfkc_strip(s) -> str:
+        if not s:
+            return ""
+        s = unicodedata.normalize("NFKC", str(s)).strip()
+        s = re.sub(r"\s+", " ", s)
+        return s
+    c = _nfkc_strip(city).replace("-", " ")
+    c = re.sub(r"\s+", " ", c)
+    s = _nfkc_strip(street)
+    h_raw = _nfkc_strip(house_number)
+    h_match = re.match(r"^\d+", h_raw)
+    h = h_match.group(0) if h_match else ""
+    return c, s, h
 
 
 async def compute_signals_batch(property_ids: list[int]) -> dict[int, dict]:
@@ -32,8 +84,8 @@ async def compute_signals_batch(property_ids: list[int]) -> dict[int, dict]:
             # BATCH QUERY 2: Property metadata
             await cur.execute(
                 """SELECT id, days_on_market, price, description,
-                          move_in_date, square_meters, neighborhood, is_agent, renovated, category,
-                          hood_id
+                          move_in_date, square_meters, square_meter_build, neighborhood, is_agent, renovated, category,
+                          hood_id, year_built, floor, elevator
                    FROM properties
                    WHERE id = ANY(%s)""",
                 (property_ids,),
@@ -264,16 +316,42 @@ def _compute_single(
         if bucket:
             pref = float(bucket["target_price_per_sqm_preferred"])
             mx = float(bucket["target_price_per_sqm_max"])
-            if price_per_sqm <= pref:
+
+            year = prop.get("year_built")
+            band = _year_band(year)
+            year_adj = _YEAR_ADJUSTMENT[band]
+            floor_adj = _floor_adjustment(prop.get("floor"), prop.get("elevator"))
+            total_adj = year_adj + floor_adj
+
+            pref_adj = pref * (1 + total_adj)
+            mx_adj = mx * (1 + total_adj)
+
+            pref_total = pref_adj * sqm
+            mx_total = mx_adj * sqm
+
+            details["amit_breakdown"] = {
+                "v": 1,
+                "year_built": year,
+                "year_band": band,
+                "year_adjustment": year_adj,
+                "floor": prop.get("floor"),
+                "elevator": bool(prop.get("elevator")) if prop.get("elevator") is not None else None,
+                "floor_adjustment": floor_adj,
+                "total_adjustment": total_adj,
+                "pref_per_sqm_baseline": pref,
+                "pref_per_sqm_adjusted": pref_adj,
+                "max_per_sqm_baseline": mx,
+                "max_per_sqm_adjusted": mx_adj,
+            }
+            details["amit_target_total_pref"] = pref_total
+            details["amit_target_total_max"] = mx_total
+
+            if price_per_sqm <= pref_adj:
                 buyer_fit_tags.append("below_amit_target")
-                details["amit_target_preferred"] = pref
-                details["amit_target_max"] = mx
-                details["amit_pct_vs_preferred"] = round(((price_per_sqm - pref) / pref) * 100, 1)
-            elif price_per_sqm <= mx:
+                details["amit_pct_vs_preferred"] = round(((price_per_sqm - pref_adj) / pref_adj) * 100, 1)
+            elif price_per_sqm <= mx_adj:
                 buyer_fit_tags.append("close_to_amit_target")
-                details["amit_target_preferred"] = pref
-                details["amit_target_max"] = mx
-                details["amit_pct_vs_preferred"] = round(((price_per_sqm - pref) / pref) * 100, 1)
+                details["amit_pct_vs_preferred"] = round(((price_per_sqm - pref_adj) / pref_adj) * 100, 1)
 
     return {
         "distress_score": 0.0,  # kept for DB compat, no longer used
