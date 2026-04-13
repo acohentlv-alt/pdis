@@ -97,3 +97,4 @@ Files committed to `~/pdis/vm-scraper/`: `run.py`, `run.sh`, `export_fb_cookies.
 | **Total** | **$0/mo** |
 
 If burner-replacement ever becomes needed: Raspberry Pi $35 one-time, or fallback to Apify ~$5–10/mo.
+
