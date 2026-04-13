@@ -46,9 +46,31 @@ Scanner now captures `info_text` from Yad2 detail API as description. ~450 exist
 ### Facebook Marketplace integration (PARKED)
 Reviewed and parked. Needs Playwright + perceptual image hashing.
 
-### Facebook Groups as 3rd source (PLANNING)
-Add 8 TLV/RG/Givatayim Hebrew rental Facebook groups as a 3rd data source alongside Yad2 and Madlan. Modeled on competitor 4kirot.com (Apify-based ingestion). 3-phase rollout planned:
-- Brief #1: Apify integration + free-text parser + new `fb_*` properties + scanner pipeline plumbing (hidden behind a feature flag)
-- Brief #2: FB-aware dedup (text+price+coarse-geo), new FB-specific signals (no-broker badge, multi-group cross-post = high distress, broker-flooding filter)
-- Brief #3: UI badges, source filter, "Hide brokers" toggle, polish
-Open questions awaiting Alan's answers before /exec — see planner output for full list.
+### Facebook Groups Brief #1 — CODE COMPLETE, AWAITING QA + DEPLOY
+Apr 12: 4 planner passes + 4 reviews + executor. Code landed (not committed). Approach switched mid-flight from Apify → burner → personal account on Oracle VM via residential proxy.
+
+**5 groups scraped:** `458499457501175` (Couples/Roommates/Families TLV), `RentinTLV` (Singles/Couples No-Broker), `333022240594651` (Fair-Priced TLV), `305724686290054` (TLV Rentals), `457465901082882` (TLV No-Broker).
+
+**Architecture:** VM scraper (`~/pdis/vm-scraper/`) with Playwright + residential proxy + personal FB cookies → POSTs to new `/api/ingest/facebook` on Render → feeds `run_scan_from_listings()` which runs full pipeline (upsert → snapshots → events → classify → matches → relistings → FB-scoped removals → stats). Phone mask `054-***-****` with tap-to-reveal on PropertyCard (FB-only), dashboard banner when health endpoint shows alert. Feature flag `FB_INGESTION_ENABLED=false` until validated.
+
+**Alan's 3 validation steps before flipping flag:**
+1. Verify `TLV_CITY_STRING = "תל אביב-יפו"` against prod Neon DB
+2. Verify m.facebook.com DOM selectors (`h3 a`, `abbr/time`, `[data-testid="post_message"]`, `article`) after first test-run
+3. Subscribe to Smartproxy (~$7/mo residential) — **PROXY_URL mandatory**, `run.sh` hard-exits without it
+
+**Alan's deployment checklist (~30 min):**
+- `openssl rand -hex 32` → set `INGEST_SECRET` on Render + VM `.env`
+- Set Render env: `FB_INGESTION_ENABLED=false`, `FB_SCANS_PER_DAY=1` (probation)
+- Run `export_fb_cookies.py` on laptop → SCP to VM as `state.json` (chmod 600)
+- Install deps on VM (`pip install -r requirements.txt && playwright install chromium`)
+- Test-run once manually (`./run.sh`), verify `posts_found > 0`
+- Add crontab with `CRON_TZ=Asia/Jerusalem` at 08:00 + 18:00 with `flock`
+- Flip `FB_INGESTION_ENABLED=true`
+
+**Next:** `/qa` Brief #1 changes, then commit + push, then Alan deploys.
+
+### Facebook Groups Brief #2 — NOT STARTED (re-plan after 1 week of real data)
+FB-aware dedup (text+price+coarse-geo), new FB-specific signals (no-broker badge, multi-group cross-post = high distress, broker-flooding filter), Nominatim geocoding pass.
+
+### Facebook Groups Brief #3 — NOT STARTED
+Source filter dropdown, "Hide brokers" toggle, "Report this listing" link, optional image proxy/cache.

@@ -6,7 +6,8 @@ import PropertyCard from '../components/PropertyCard';
 import PresetManager from '../components/PresetManager';
 import { usePresetProperties, useAllPresets, useFavoriteIds, useWhitelistIds, useBlacklistIds, useScanStatus } from '../api/queries';
 import { useAddFavorite, useRemoveFavorite, useWhitelist, useRemoveWhitelist, useBlacklist, useRemoveBlacklist } from '../api/mutations';
-import { matchesPresetCriteria, computeTargetPriceSqm } from '../lib/presetMatch';
+import { matchesPresetCriteria } from '../lib/presetMatch';
+import { signalCount } from '../lib/signalCount';
 
 function getPresetSummary(preset: Record<string, unknown>): string {
   const parts: string[] = [];
@@ -112,13 +113,6 @@ function applyFilters(
     });
   }
 
-  const signalCount = (item: Record<string, unknown>) => {
-    const sd = (item.signal_details as Record<string, unknown>) ?? {};
-    const strong = (sd.strong_signals as string[]) ?? [];
-    const weak = (sd.weak_signals as string[]) ?? [];
-    return strong.length + weak.length;
-  };
-
   result.sort((a, b) => {
     if (sortBy === 'price') {
       return ((a.price as number) ?? 0) - ((b.price as number) ?? 0);
@@ -131,7 +125,7 @@ function applyFilters(
     // default: longest on market first, then most signals
     const domDiff = ((b.days_on_market as number) ?? 0) - ((a.days_on_market as number) ?? 0);
     if (domDiff !== 0) return domDiff;
-    return signalCount(b) - signalCount(a);
+    return signalCount(b.signal_details) - signalCount(a.signal_details);
   });
 
   return result;
@@ -177,6 +171,15 @@ export default function OpportunityPage() {
   const { data: whitelistData } = useWhitelistIds();
   const { data: blacklistData } = useBlacklistIds();
   const { data: scanStatus } = useScanStatus();
+
+  // FB ingest health check — polled on mount
+  const [fbHealthAlert, setFbHealthAlert] = useState(false);
+  useEffect(() => {
+    fetch('/api/ingest/facebook/health')
+      .then(r => r.json())
+      .then((data: { alert?: boolean }) => { if (data.alert) setFbHealthAlert(true); })
+      .catch(() => {/* ignore — non-critical */});
+  }, []);
 
   const favIds = useMemo(() => new Set(favData?.ids ?? []), [favData]);
   const whitelistIds = useMemo(() => new Set(whitelistData?.ids ?? []), [whitelistData]);
@@ -267,10 +270,6 @@ export default function OpportunityPage() {
     return [matching, other];
   }, [filtered, selectedPreset]);
 
-  const targetPriceSqm = useMemo(() =>
-    selectedPreset ? computeTargetPriceSqm(selectedPreset) : null
-  , [selectedPreset]);
-
   const greeting = (() => {
     const hour = new Date().getHours();
     if (hour < 12) return 'Good morning';
@@ -310,6 +309,13 @@ export default function OpportunityPage() {
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
       <div className="p-4 space-y-3">
+        {/* FB ingest health alert */}
+        {fbHealthAlert && (
+          <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm px-3 py-2 rounded-lg">
+            Facebook data not updating — check scraper
+          </div>
+        )}
+
         {/* Header: Greeting + Scan status + Refresh + Gear */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -426,7 +432,6 @@ export default function OpportunityPage() {
               isBlacklisted={blacklistIds.has(item.yad2_id as string)}
               onToggleWhitelist={() => handleToggleWhitelist(item.yad2_id as string)}
               onToggleBlacklist={() => handleToggleBlacklist(item.yad2_id as string)}
-              targetPriceSqm={targetPriceSqm}
             />
           ))}
           {otherItems.length > 0 && (
@@ -442,8 +447,7 @@ export default function OpportunityPage() {
                   isBlacklisted={blacklistIds.has(item.yad2_id as string)}
                   onToggleWhitelist={() => handleToggleWhitelist(item.yad2_id as string)}
                   onToggleBlacklist={() => handleToggleBlacklist(item.yad2_id as string)}
-                  targetPriceSqm={targetPriceSqm}
-                />
+                    />
               ))}
             </>
           )}

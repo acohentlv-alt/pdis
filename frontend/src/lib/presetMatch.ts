@@ -28,13 +28,3 @@ export function matchesPresetCriteria(
 
   return true;
 }
-
-export function computeTargetPriceSqm(preset: Record<string, unknown>): number | null {
-  const maxPrice = preset.max_price as number | null;
-  const extraParams = (preset.extra_params as Record<string, unknown>) ?? {};
-  const minSqm = extraParams.min_sqm as number | null;
-  if (maxPrice && minSqm && minSqm > 0) {
-    return maxPrice / minSqm;
-  }
-  return null;
-}

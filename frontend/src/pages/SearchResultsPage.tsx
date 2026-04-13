@@ -4,6 +4,7 @@ import { useAddFavorite, useRemoveFavorite, useWhitelist, useRemoveWhitelist, us
 import FilterBar from '../components/FilterBar';
 import PropertyCard from '../components/PropertyCard';
 import { formatDate } from '../lib/format';
+import { signalCount } from '../lib/signalCount';
 
 function applyFilters(
   items: Record<string, unknown>[],
@@ -44,8 +45,8 @@ function applyFilters(
     if (sortBy === 'days_on_market') {
       return ((b.days_on_market as number) ?? 0) - ((a.days_on_market as number) ?? 0);
     }
-    // default: distress_score
-    return ((b.distress_score as number) ?? 0) - ((a.distress_score as number) ?? 0);
+    // default: most signals first
+    return signalCount(b.signal_details) - signalCount(a.signal_details);
   });
 
   return result;
@@ -55,7 +56,7 @@ export default function SearchResultsPage() {
   const [selectedPresetId, setSelectedPresetId] = useState<number | null>(null);
   const [neighborhoods, setNeighborhoods] = useState<string[]>([]);
   const [selectedRooms, setSelectedRooms] = useState<string[]>([]);
-  const [sortBy, setSortBy] = useState('distress_score');
+  const [sortBy, setSortBy] = useState('signals');
   const [keyword, setKeyword] = useState('');
   const [debouncedKeyword, setDebouncedKeyword] = useState('');
 
@@ -110,7 +111,7 @@ export default function SearchResultsPage() {
             setSelectedPresetId(null);
             setNeighborhoods([]);
             setSelectedRooms([]);
-            setSortBy('distress_score');
+            setSortBy('signals');
           }}
           className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800"
         >

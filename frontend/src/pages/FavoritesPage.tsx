@@ -3,6 +3,7 @@ import FilterBar from '../components/FilterBar';
 import PropertyCard from '../components/PropertyCard';
 import { useFavorites, useFavoriteIds, useWhitelistIds, useBlacklistIds, useWhitelistProperties, useBlacklistProperties } from '../api/queries';
 import { useAddFavorite, useRemoveFavorite, useWhitelist, useRemoveWhitelist, useBlacklist, useRemoveBlacklist } from '../api/mutations';
+import { signalCount } from '../lib/signalCount';
 
 type Tab = 'favorites' | 'whitelist' | 'blacklist';
 
@@ -70,8 +71,8 @@ function applyFilters(
       const bPsqm = ((b.price as number) ?? 0) / (((b.square_meter_build as number) || (b.square_meters as number)) || 1);
       return aPsqm - bPsqm;
     }
-    // default: distress_score
-    return ((b.distress_score as number) ?? 0) - ((a.distress_score as number) ?? 0);
+    // default: most signals first
+    return signalCount(b.signal_details) - signalCount(a.signal_details);
   });
 
   return result;
@@ -82,7 +83,7 @@ export default function FavoritesPage() {
   const [neighborhoods, setNeighborhoods] = useState<string[]>([]);
   const [selectedRooms, setSelectedRooms] = useState<string[]>([]);
   const [source, setSource] = useState('');
-  const [sortBy, setSortBy] = useState('distress_score');
+  const [sortBy, setSortBy] = useState('signals');
   const [keyword, setKeyword] = useState('');
   const [debouncedKeyword, setDebouncedKeyword] = useState('');
   const [minPriceSqm, setMinPriceSqm] = useState('');

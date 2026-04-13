@@ -11,7 +11,6 @@ interface PropertyCardProps {
   isBlacklisted?: boolean;
   onToggleWhitelist?: () => void;
   onToggleBlacklist?: () => void;
-  targetPriceSqm?: number | null;
 }
 
 function getSignalDetails(item: Record<string, unknown>): Record<string, unknown> {
@@ -29,7 +28,6 @@ export default function PropertyCard({
   isBlacklisted,
   onToggleWhitelist,
   onToggleBlacklist,
-  targetPriceSqm,
 }: PropertyCardProps) {
   const navigate = useNavigate();
   const yad2Id = item.yad2_id as string;
@@ -80,17 +78,7 @@ export default function PropertyCard({
   const isFav = favoriteIds?.has(yad2Id) ?? false;
 
   const [showViewer, setShowViewer] = useState(false);
-
-  // Precomputed to avoid TS 5.9 JSX children inference issues
-  let dealQualityLabel: string | null = null;
-  let dealQualityColor = 'text-gray-600';
-  if (targetPriceSqm != null && price != null && sqm != null) {
-    const pctDiff = ((price / sqm) - targetPriceSqm) / targetPriceSqm * 100;
-    dealQualityLabel = pctDiff <= 0
-      ? `${Math.abs(pctDiff).toFixed(0)}% below target`
-      : `${pctDiff.toFixed(0)}% above target`;
-    dealQualityColor = pctDiff <= 0 ? 'text-green-600' : pctDiff <= 10 ? 'text-yellow-600' : 'text-red-500';
-  }
+  const [phoneRevealed, setPhoneRevealed] = useState(false);
 
   const whatIsItParts: string[] = [];
   if (propertyType) whatIsItParts.push(propertyType.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()));
@@ -104,12 +92,29 @@ export default function PropertyCard({
   const descriptionText = hasDescription ? String(item.description) : '';
 
   const hasAddress = !!(item.address_street || item.address_home_number);
+
+  const signalDetails = sd as Record<string, unknown> & {
+    buyer_fit_tags?: string[];
+    amit_pct_vs_preferred?: number | null;
+    strong_signals?: string[];
+    weak_signals?: string[];
+  };
+
+  const hasAmitPill =
+    signalDetails?.buyer_fit_tags?.includes('below_amit_target') ||
+    signalDetails?.buyer_fit_tags?.includes('close_to_amit_target');
   const addressText = hasAddress
     ? `, ${String(item.address_street || '')}${item.address_home_number ? ` ${String(item.address_home_number)}` : ''}`
     : '';
 
   return (
     <div className="bg-white rounded-xl shadow overflow-hidden">
+      {signalDetails?.buyer_fit_tags?.includes('below_amit_target') &&
+       (signalDetails?.strong_signals?.length ?? 0) > 0 && (
+        <div className="bg-amber-400 text-amber-950 font-bold text-xs uppercase tracking-wider py-1.5 text-center">
+          🎯 PRIME DEAL
+        </div>
+      )}
       {imageUrls.length > 0 && (
         <img src={imageUrls[0]} alt="" className="w-full h-40 object-cover cursor-pointer" loading="lazy" onClick={() => setShowViewer(true)} />
       )}
@@ -121,7 +126,6 @@ export default function PropertyCard({
           <span className="text-lg font-bold text-gray-900">{formatPrice(price)}</span>
           <span className="text-lg font-bold text-blue-600">{price != null && sqm != null ? formatPricePerSqm(price, sqm) : ''}</span>
         </div>
-        {dealQualityLabel && <div className={`text-xs font-medium ${dealQualityColor}`}>{dealQualityLabel}</div>}
         {whatIsIt && <div className="text-sm text-gray-600">{whatIsIt}</div>}
         <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-500">
           {floor != null && <span>Floor {floor}{totalFloors != null ? `/${totalFloors}` : ''}</span>}
@@ -146,8 +150,53 @@ export default function PropertyCard({
           {longListed && <span className="text-xs bg-yellow-50 text-yellow-700 px-2 py-0.5 rounded-full">Long listed</span>}
           {weakLanguage && <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">Weak language</span>}
           {conditionAlert && <span className="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full">Condition</span>}
-          {belowAvgPrice && <span className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full">Below avg</span>}
+          {signalDetails?.buyer_fit_tags?.includes('below_amit_target') && signalDetails?.amit_pct_vs_preferred != null && (
+            <span className="inline-flex items-center rounded-full bg-green-100 text-green-800 px-2 py-0.5 text-xs font-medium">
+              Amit Fit · −{Math.abs(Math.round(signalDetails.amit_pct_vs_preferred as number))}%
+            </span>
+          )}
+          {signalDetails?.buyer_fit_tags?.includes('close_to_amit_target') && signalDetails?.amit_pct_vs_preferred != null && (
+            <span className="inline-flex items-center rounded-full bg-yellow-100 text-yellow-800 px-2 py-0.5 text-xs font-medium">
+              Close · +{Math.abs(Math.round(signalDetails.amit_pct_vs_preferred as number))}%
+            </span>
+          )}
+          {!hasAmitPill && belowAvgPrice && <span className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full">Below avg</span>}
         </div>
+        {source === 'facebook' && (item.contact_phone as string | null) && (
+          <div className="flex items-center gap-2 text-sm">
+            {phoneRevealed ? (
+              <a
+                href={`tel:${item.contact_phone as string}`}
+                className="text-blue-600 underline"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {item.contact_phone as string}
+              </a>
+            ) : (
+              <>
+                <span className="text-gray-500">
+                  {(item.contact_phone as string).slice(0, 3)}-***-****
+                </span>
+                <button
+                  aria-label="Show phone number"
+                  title="Tap to reveal"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPhoneRevealed(true);
+                    fetch('/api/ingest/facebook/log-reveal', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ yad2_id: yad2Id }),
+                    }).catch(() => {/* fire-and-forget */});
+                  }}
+                  className="text-gray-400 hover:text-gray-700 text-base leading-none"
+                >
+                  &#128065;
+                </button>
+              </>
+            )}
+          </div>
+        )}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1">
             {onToggleFavorite && (
@@ -169,6 +218,7 @@ export default function PropertyCard({
           <div className="flex items-center gap-1">
             {allSources.has('yad2') && <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">Y2</span>}
             {allSources.has('madlan') && <span className="text-xs bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded">MD</span>}
+            {allSources.has('facebook') && <span className="text-xs bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded">FB</span>}
           </div>
         </div>
         <div className="flex gap-2 pt-1">
@@ -177,7 +227,7 @@ export default function PropertyCard({
           </button>
           {sourceUrl && (
             <button onClick={() => window.open(sourceUrl, '_blank')} className="flex-1 min-h-[44px] border border-gray-300 text-gray-700 rounded-lg text-sm font-medium">
-              View on {source === 'madlan' ? 'Madlan' : 'Yad2'} →
+              View on {source === 'madlan' ? 'Madlan' : source === 'facebook' ? 'Facebook' : 'Yad2'} →
             </button>
           )}
         </div>
