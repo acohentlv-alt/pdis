@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useAllPresets, useNeighborhoods, useThresholds } from '../api/queries';
+import { useAllPresets, useNeighborhoods, useThresholds, useFeatureAdjustments } from '../api/queries';
 import {
   useCreatePreset,
   useUpdatePreset,
@@ -8,6 +8,7 @@ import {
   useClonePreset,
   useScanPreset,
   useUpsertThresholds,
+  useUpsertFeatureAdjustments,
 } from '../api/mutations';
 
 interface PresetManagerProps {
@@ -66,6 +67,26 @@ const SIZE_BUCKETS: Array<[number, number]> = [
   [30, 40], [40, 50], [50, 60], [60, 70], [70, 80], [80, 90], [90, 100],
 ];
 const bucketKey = (lo: number, hi: number) => `${lo}-${hi}`;
+
+interface FaRow {
+  year_old_pref: string;     year_old_max: string;
+  year_mid_old_pref: string; year_mid_old_max: string;
+  year_mid_pref: string;     year_mid_max: string;
+  year_new_pref: string;     year_new_max: string;
+  walkup: string;
+  parking_pref: string; parking_max: string;
+  mamad_pref: string;   mamad_max: string;
+}
+const _DEFAULT_FA: FaRow = {
+  year_old_pref: '-18',     year_old_max: '-18',
+  year_mid_old_pref: '-8',  year_mid_old_max: '-8',
+  year_mid_pref: '0',       year_mid_max: '0',
+  year_new_pref: '5',       year_new_max: '5',
+  walkup: '3',
+  parking_pref: '0', parking_max: '0',
+  mamad_pref: '0',   mamad_max: '0',
+};
+type FaState = Record<number, FaRow>;
 
 const emptyForm = (): PresetFormData => ({
   name: '',
@@ -239,6 +260,44 @@ export default function PresetManager({ open, onClose, category }: PresetManager
 
   const seededKeyRef = useRef<string | null>(null);
 
+  const upsertFeatureAdjustments = useUpsertFeatureAdjustments();
+  const { data: faData } = useFeatureAdjustments('forsale', open && isForSale);
+
+  const [faTargets, setFaTargets] = useState<FaState>({});
+  const [faExpanded, setFaExpanded] = useState(false);
+  const [faHoodExpanded, setFaHoodExpanded] = useState<Record<number, boolean>>({});
+  const seededFaKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const currentKey = `${editingId ?? 'none'}-${showCreate ? 'create' : 'noedit'}`;
+    if (!faData?.adjustments || !hoodData?.neighborhoods) return;
+    if (seededFaKeyRef.current === currentKey) return;
+    seededFaKeyRef.current = currentKey;
+
+    const hoodNameToId = new Map(hoodData.neighborhoods.map((h: any) => [h.neighborhood, h.hood_id]));
+    const seeded: FaState = {};
+    for (const a of faData.adjustments) {
+      const hoodId = a.hood_id ?? hoodNameToId.get(a.neighborhood);
+      if (hoodId == null) continue;
+      seeded[hoodId] = {
+        year_old_pref: String(a.year_old_pref_pct),
+        year_old_max: String(a.year_old_max_pct),
+        year_mid_old_pref: String(a.year_mid_old_pref_pct),
+        year_mid_old_max: String(a.year_mid_old_max_pct),
+        year_mid_pref: String(a.year_mid_pref_pct),
+        year_mid_max: String(a.year_mid_max_pct),
+        year_new_pref: String(a.year_new_pref_pct),
+        year_new_max: String(a.year_new_max_pct),
+        walkup: String(a.walkup_pct_per_floor),
+        parking_pref: String(a.parking_bonus_pref),
+        parking_max: String(a.parking_bonus_max),
+        mamad_pref: String(a.mamad_pct_pref),
+        mamad_max: String(a.mamad_pct_max),
+      };
+    }
+    setFaTargets(seeded);
+  }, [faData, hoodData, editingId, showCreate]);
+
   useEffect(() => {
     const currentKey = `${editingId ?? 'none'}-${showCreate ? 'create' : 'noedit'}`;
     if (!thresholdsData?.thresholds || !hoodData?.neighborhoods) return;
@@ -262,6 +321,7 @@ export default function PresetManager({ open, onClose, category }: PresetManager
   useEffect(() => {
     if (!open) {
       seededKeyRef.current = null;
+      seededFaKeyRef.current = null;
     }
   }, [open]);
 
@@ -294,6 +354,10 @@ export default function PresetManager({ open, onClose, category }: PresetManager
     setNeighborhoodExpanded({});
     setPricingExpanded(false);
     seededKeyRef.current = null;
+    setFaTargets({});
+    setFaHoodExpanded({});
+    setFaExpanded(false);
+    seededFaKeyRef.current = null;
   }
 
   async function handleSubmit() {
@@ -338,25 +402,88 @@ export default function PresetManager({ open, onClose, category }: PresetManager
       }
     }
 
+    const faToSave: Array<{
+      neighborhood: string; hood_id: number; category: string;
+      year_old_pref_pct: number; year_old_max_pct: number;
+      year_mid_old_pref_pct: number; year_mid_old_max_pct: number;
+      year_mid_pref_pct: number; year_mid_max_pct: number;
+      year_new_pref_pct: number; year_new_max_pct: number;
+      walkup_pct_per_floor: number;
+      parking_bonus_pref: number; parking_bonus_max: number;
+      mamad_pct_pref: number; mamad_pct_max: number;
+    }> = [];
+    if (form.category === 'forsale' && hoodData?.neighborhoods) {
+      const hoodIdToName = new Map(hoodData.neighborhoods.map((h: any) => [h.hood_id, h.neighborhood]));
+      const selectedHoods = form.neighborhood?.split(',').filter(Boolean).map(Number) || [];
+      for (const hoodId of selectedHoods) {
+        const name = hoodIdToName.get(hoodId);
+        if (!name) continue;
+        const r = faTargets[hoodId];
+        if (!r) continue;
+
+        const n = (s: string) => (s.trim() === '' ? NaN : Number(s));
+        const yOp = n(r.year_old_pref), yOm = n(r.year_old_max);
+        const yMOp = n(r.year_mid_old_pref), yMOm = n(r.year_mid_old_max);
+        const yMp = n(r.year_mid_pref), yMm = n(r.year_mid_max);
+        const yNp = n(r.year_new_pref), yNm = n(r.year_new_max);
+        const w = n(r.walkup);
+        const pP = n(r.parking_pref), pM = n(r.parking_max);
+        const mP = n(r.mamad_pref), mM = n(r.mamad_max);
+        const allNums = [yOp, yOm, yMOp, yMOm, yMp, yMm, yNp, yNm, w, pP, pM, mP, mM];
+        if (allNums.some(v => !Number.isFinite(v))) {
+          setFormError(`${name}: all Feature Adjustments fields are required.`);
+          return;
+        }
+        if (w < 0 || w > 10) {
+          setFormError(`${name}: Walk-up % per floor must be between 0 and 10.`);
+          return;
+        }
+        if (yOm < yOp) { setFormError(`${name} year (old): Max must be >= Preferred.`); return; }
+        if (yMOm < yMOp) { setFormError(`${name} year (mid-old): Max must be >= Preferred.`); return; }
+        if (yMm < yMp) { setFormError(`${name} year (mid): Max must be >= Preferred.`); return; }
+        if (yNm < yNp) { setFormError(`${name} year (new): Max must be >= Preferred.`); return; }
+        if (pM < pP) { setFormError(`${name} parking: Max must be >= Preferred.`); return; }
+        if (mM < mP) { setFormError(`${name} mamad: Max must be >= Preferred.`); return; }
+
+        faToSave.push({
+          neighborhood: name, hood_id: hoodId, category: 'forsale',
+          year_old_pref_pct: yOp, year_old_max_pct: yOm,
+          year_mid_old_pref_pct: yMOp, year_mid_old_max_pct: yMOm,
+          year_mid_pref_pct: yMp, year_mid_max_pct: yMm,
+          year_new_pref_pct: yNp, year_new_max_pct: yNm,
+          walkup_pct_per_floor: w,
+          parking_bonus_pref: pP, parking_bonus_max: pM,
+          mamad_pct_pref: mP, mamad_pct_max: mM,
+        });
+      }
+    }
+
+    const wasCreate = editingId === null;
     try {
-      if (editingId !== null) {
-        await updatePreset.mutateAsync({ id: editingId, ...formToPayload(form) });
+      if (!wasCreate) {
+        await updatePreset.mutateAsync({ id: editingId as number, ...formToPayload(form) });
       } else {
         const created = await createPreset.mutateAsync(formToPayload(form));
         if (created && typeof (created as any).id === 'number') {
           setEditingId((created as any).id);
-          setShowCreate(false);
         }
       }
       if (thresholdsToSave.length > 0) {
         await upsertThresholds.mutateAsync(thresholdsToSave);
       }
-      if (editingId !== null) setEditingId(null);
-      else setShowCreate(false);
+      if (faToSave.length > 0) {
+        await upsertFeatureAdjustments.mutateAsync(faToSave);
+      }
+      if (wasCreate) setShowCreate(false);
+      setEditingId(null);
       setPricingTargets({});
       setNeighborhoodExpanded({});
       setPricingExpanded(false);
       seededKeyRef.current = null;
+      setFaTargets({});
+      setFaHoodExpanded({});
+      setFaExpanded(false);
+      seededFaKeyRef.current = null;
     } catch (e: any) {
       setFormError(`Save failed: ${e?.message || 'unknown error'}`);
     }
@@ -715,6 +842,122 @@ export default function PresetManager({ open, onClose, category }: PresetManager
           </div>
         )}
 
+        {form.category === 'forsale' && (
+          <div className="border-t border-gray-200 pt-3">
+            <button
+              type="button"
+              onClick={() => setFaExpanded((v: boolean) => !v)}
+              className="w-full text-left text-xs text-blue-600 hover:text-blue-800 py-1"
+            >
+              {faExpanded ? '▲ Hide Feature Adjustments (Amit Fit)' : '▼ Show Feature Adjustments (Amit Fit)'}
+            </button>
+
+            {faExpanded && (() => {
+              const selectedHoodIds = form.neighborhood?.split(',').filter(Boolean).map(Number).filter((n: number) => !isNaN(n)) || [];
+              if (selectedHoodIds.length === 0) {
+                return <div className="text-xs text-gray-400 py-2 text-center">Select neighborhoods above first.</div>;
+              }
+              const hoodIdToName = new Map((hoodData?.neighborhoods || []).map((h: any) => [h.hood_id, h.neighborhood]));
+
+              return (
+                <div className="space-y-2 mt-2">
+                  <div className="text-[11px] text-gray-500 italic px-1">
+                    Adjustments are shared across all presets for this neighborhood. Defaults applied on first open.
+                  </div>
+                  {selectedHoodIds.map((hoodId: number) => {
+                    const name = hoodIdToName.get(hoodId);
+                    if (!name) return null;
+                    const isOpen = !!faHoodExpanded[hoodId];
+                    const row: FaRow = faTargets[hoodId] || _DEFAULT_FA;
+                    const setRow = (patch: Partial<FaRow>) => {
+                      setFaTargets((prev: FaState) => ({
+                        ...prev,
+                        [hoodId]: { ...(prev[hoodId] || _DEFAULT_FA), ...patch },
+                      }));
+                    };
+
+                    return (
+                      <div key={hoodId} className="border border-gray-200 rounded-lg">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!faTargets[hoodId]) setFaTargets(prev => ({ ...prev, [hoodId]: _DEFAULT_FA }));
+                            setFaHoodExpanded((prev: Record<number, boolean>) => ({ ...prev, [hoodId]: !prev[hoodId] }));
+                          }}
+                          className="w-full flex items-center justify-between gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                        >
+                          <span className="flex items-center gap-1 min-w-0">
+                            <span className="flex-shrink-0">{isOpen ? '▲' : '▼'}</span>
+                            <span dir="auto" className="truncate">{name}</span>
+                          </span>
+                          <span className="text-xs text-gray-400 flex-shrink-0">Feature tweaks</span>
+                        </button>
+                        {isOpen && (
+                          <div className="px-3 pb-3 space-y-4">
+                            <div>
+                              <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Year Built Adjustments (%)</div>
+                              {[
+                                { label: 'Old (<1960)',       pK: 'year_old_pref' as const,     mK: 'year_old_max' as const },
+                                { label: 'Mid-Old (1960–1989)', pK: 'year_mid_old_pref' as const, mK: 'year_mid_old_max' as const },
+                                { label: 'Mid (1990–2009)',    pK: 'year_mid_pref' as const,     mK: 'year_mid_max' as const },
+                                { label: 'New (≥2010)',         pK: 'year_new_pref' as const,     mK: 'year_new_max' as const },
+                              ].map(b => (
+                                <div key={b.label} className="mb-2">
+                                  <label className={labelCls}>{b.label}</label>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <input type="number" step="0.5" className={inputCls}
+                                      placeholder="Preferred %" value={row[b.pK]}
+                                      onChange={(e: any) => setRow({ [b.pK]: e.target.value } as Partial<FaRow>)} />
+                                    <input type="number" step="0.5" className={inputCls}
+                                      placeholder="Max %" value={row[b.mK]}
+                                      onChange={(e: any) => setRow({ [b.mK]: e.target.value } as Partial<FaRow>)} />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                            <div>
+                              <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Walk-up Penalty</div>
+                              <label className={labelCls}>% per floor above 1, no elevator</label>
+                              <input type="number" step="0.5" min="0" max="10" className={inputCls}
+                                placeholder="e.g. 3" value={row.walkup}
+                                onChange={(e: any) => setRow({ walkup: e.target.value })} />
+                              <div className="text-[11px] text-gray-400 mt-1">
+                                Applied as negative. E.g. 3 = -3% per floor. Cap: 15%.
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Parking Bonus (₪)</div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <input type="number" step="1000" min="0" className={inputCls}
+                                  placeholder="Preferred ₪" value={row.parking_pref}
+                                  onChange={(e: any) => setRow({ parking_pref: e.target.value })} />
+                                <input type="number" step="1000" min="0" className={inputCls}
+                                  placeholder="Max ₪" value={row.parking_max}
+                                  onChange={(e: any) => setRow({ parking_max: e.target.value })} />
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Mamad Bonus (%)</div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <input type="number" step="0.5" className={inputCls}
+                                  placeholder="Preferred %" value={row.mamad_pref}
+                                  onChange={(e: any) => setRow({ mamad_pref: e.target.value })} />
+                                <input type="number" step="0.5" className={inputCls}
+                                  placeholder="Max %" value={row.mamad_max}
+                                  onChange={(e: any) => setRow({ mamad_max: e.target.value })} />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
         {formError && (
           <div className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{formError}</div>
         )}
@@ -722,10 +965,10 @@ export default function PresetManager({ open, onClose, category }: PresetManager
         <div className="flex gap-2">
           <button
             onClick={handleSubmit}
-            disabled={createPreset.isPending || updatePreset.isPending || upsertThresholds.isPending}
+            disabled={createPreset.isPending || updatePreset.isPending || upsertThresholds.isPending || upsertFeatureAdjustments.isPending}
             className="flex-1 bg-gray-900 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50"
           >
-            {createPreset.isPending || updatePreset.isPending || upsertThresholds.isPending ? 'Saving…' : 'Save'}
+            {createPreset.isPending || updatePreset.isPending || upsertThresholds.isPending || upsertFeatureAdjustments.isPending ? 'Saving…' : 'Save'}
           </button>
           <button onClick={cancelForm} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm text-gray-700">
             Cancel
@@ -740,6 +983,10 @@ export default function PresetManager({ open, onClose, category }: PresetManager
     setNeighborhoodExpanded({});
     setPricingExpanded(false);
     seededKeyRef.current = null;
+    setFaTargets({});
+    setFaHoodExpanded({});
+    setFaExpanded(false);
+    seededFaKeyRef.current = null;
     onClose();
   }
 

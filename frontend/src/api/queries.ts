@@ -204,3 +204,36 @@ export function useThresholds(category: string = 'forsale', enabled: boolean = t
     refetchOnWindowFocus: false,
   });
 }
+
+export interface FeatureAdjustmentRow {
+  id: number;
+  neighborhood: string;
+  hood_id: number | null;
+  category: string;
+  year_old_pref_pct: number;
+  year_old_max_pct: number;
+  year_mid_old_pref_pct: number;
+  year_mid_old_max_pct: number;
+  year_mid_pref_pct: number;
+  year_mid_max_pct: number;
+  year_new_pref_pct: number;
+  year_new_max_pct: number;
+  walkup_pct_per_floor: number;
+  parking_bonus_pref: number;
+  parking_bonus_max: number;
+  mamad_pct_pref: number;
+  mamad_pct_max: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export function useFeatureAdjustments(category: string = 'forsale', enabled: boolean = true) {
+  return useQuery({
+    queryKey: ['featureAdjustments', category],
+    queryFn: () => apiFetch<{ adjustments: FeatureAdjustmentRow[] }>(
+      `/api/feature-adjustments?category=${category}`
+    ),
+    enabled,
+    refetchOnWindowFocus: false,
+  });
+}

@@ -230,3 +230,23 @@ export function useUpsertThresholds() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['thresholds'] }),
   });
 }
+
+export function useUpsertFeatureAdjustments() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (adjustments: Array<{
+      neighborhood: string; hood_id?: number | null; category: string;
+      year_old_pref_pct: number; year_old_max_pct: number;
+      year_mid_old_pref_pct: number; year_mid_old_max_pct: number;
+      year_mid_pref_pct: number; year_mid_max_pct: number;
+      year_new_pref_pct: number; year_new_max_pct: number;
+      walkup_pct_per_floor: number;
+      parking_bonus_pref: number; parking_bonus_max: number;
+      mamad_pct_pref: number; mamad_pct_max: number;
+    }>) => apiFetch('/api/feature-adjustments', {
+      method: 'PUT',
+      body: JSON.stringify({ adjustments }),
+    }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['featureAdjustments'] }),
+  });
+}

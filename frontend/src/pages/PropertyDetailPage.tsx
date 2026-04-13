@@ -99,6 +99,10 @@ export default function PropertyDetailPage() {
   const weakLanguage = Array.isArray(sd.weak_language_found) ? sd.weak_language_found as unknown[] : [];
   const conditionKeywords = Array.isArray(sd.condition_keywords_found) ? sd.condition_keywords_found as string[] : [];
 
+  const amitBreakdown = (sd.amit_breakdown as Record<string, unknown> | null) ?? null;
+  const hasAmitBreakdown = !!amitBreakdown && (amitBreakdown.v as number) === 2;
+  const amitPctVsPreferred = sd.amit_pct_vs_preferred as number | null | undefined;
+
   // Summary line
   const summaryParts: string[] = [];
   if (hasRelisting) summaryParts.push('Returned after removal');
@@ -266,6 +270,97 @@ export default function PropertyDetailPage() {
           {summaryParts.join(' + ')}
         </div>
       ) : null}
+
+      {/* Amit Target Breakdown */}
+      {hasAmitBreakdown && (() => {
+        const b = amitBreakdown as Record<string, any>;
+        const bandLabel: Record<string, string> = {
+          old: 'Old (<1960)',
+          mid_old: 'Mid-Old (1960–1989)',
+          mid: 'Mid (1990–2009)',
+          new: 'New (≥2010)',
+        };
+        const fmt = (n: number | null | undefined) =>
+          n == null ? '—' : `₪${Math.round(n).toLocaleString('en-US')}`;
+        const pct = (n: number | null | undefined, digits = 1) =>
+          n == null ? '0%' : `${n >= 0 ? '+' : ''}${(n * 100).toFixed(digits)}%`;
+        const pctRaw = (n: number | null | undefined, digits = 1) =>
+          n == null ? '0%' : `${n >= 0 ? '+' : ''}${Number(n).toFixed(digits)}%`;
+
+        const yearBand = b.year_band as string;
+        const yearBuilt = b.year_built as number | null;
+        const yearPref = b.year_pref_pct as number;
+        const floor = b.floor as number | null;
+        const floorAdj = b.floor_adjustment_applied as number;
+        const parkingApplied = b.parking_applied as boolean;
+        const parkingPref = b.parking_bonus_pref_applied as number;
+        const mamadApplied = b.mamad_applied as boolean;
+        const mamadPref = b.mamad_pct_pref_applied as number;
+        const totalPref = b.total_pref_pct_applied as number;
+        const prefPerSqm = b.pref_per_sqm_baseline as number;
+        const maxPerSqm = b.max_per_sqm_baseline as number;
+        const prefAdjusted = b.pref_total_adjusted as number;
+        const maxAdjusted = b.max_total_adjusted as number;
+        const listingPrice = b.price as number | null;
+        const source = (b.fa_source as string) === 'neighborhood' ? 'Neighborhood custom' : 'Default values';
+
+        return (
+          <Section title="Amit Target Breakdown">
+            <div className="text-sm text-gray-700 space-y-1.5">
+              <div>
+                <span className="text-gray-500">Base per-sqm:</span>{' '}
+                <span className="font-medium">{fmt(prefPerSqm)}/m² – {fmt(maxPerSqm)}/m²</span>
+              </div>
+              <div>
+                <span className="text-gray-500">Year:</span>{' '}
+                <span className="font-medium">{yearBuilt ?? 'unknown'}</span>{' '}
+                → {bandLabel[yearBand] ?? yearBand} · <span className="font-medium">{pctRaw(yearPref)}</span>
+              </div>
+              {floorAdj !== 0 && (
+                <div>
+                  <span className="text-gray-500">Floor:</span>{' '}
+                  <span className="font-medium">{floor ?? '—'}, no elevator</span>{' '}
+                  · <span className="font-medium">{pct(floorAdj)}</span>
+                </div>
+              )}
+              {parkingApplied && (
+                <div>
+                  <span className="text-green-700">+ Parking:</span>{' '}
+                  <span className="font-medium">{fmt(parkingPref)}</span>
+                </div>
+              )}
+              {mamadApplied && (
+                <div>
+                  <span className="text-green-700">+ Mamad:</span>{' '}
+                  <span className="font-medium">{pct(mamadPref)}</span>
+                </div>
+              )}
+              <div className="border-t border-gray-100 pt-1.5">
+                <span className="text-gray-500">Combined:</span>{' '}
+                <span className="font-medium">{pct(totalPref)}</span>
+              </div>
+              <div>
+                <span className="text-gray-500">Adjusted target:</span>{' '}
+                <span className="font-medium">{fmt(prefAdjusted)} – {fmt(maxAdjusted)}</span>
+              </div>
+              {listingPrice != null && (
+                <div>
+                  <span className="text-gray-500">This property:</span>{' '}
+                  <span className="font-medium">{fmt(listingPrice)}</span>
+                  {amitPctVsPreferred != null && (
+                    <> vs target {fmt(prefAdjusted)} (
+                      <span className={amitPctVsPreferred <= 0 ? 'text-green-700' : 'text-red-700'}>
+                        {pctRaw(amitPctVsPreferred)}
+                      </span>)
+                    </>
+                  )}
+                </div>
+              )}
+              <div className="text-xs text-gray-400 pt-1">Source: {source}</div>
+            </div>
+          </Section>
+        );
+      })()}
 
       {/* Signals */}
       <Section title="Signals">
