@@ -83,3 +83,57 @@ Scrapes 5 TLV rental Facebook groups and sends results to the PDIS Render backen
 - Never commit `state.json`, `fb_state.json`, or `.env` — they are in `.gitignore`
 - `state.json` contains FB session cookies — treat like a password, `chmod 600`
 - `INGEST_SECRET` is never logged by the scraper
+
+---
+
+## Yad2 forsale scraper
+
+### Why
+
+Render's IP is blocked by ShieldSquare (Yad2's anti-bot system) on the `/forsale` endpoint.
+The `/rent` endpoint works fine on Render. For forsale, scraping must run from the Oracle VM
+which uses a residential-grade Oracle Cloud IP that is not on Yad2's blocklist.
+
+### Deploy
+
+```bash
+# Copy files to VM
+scp vm-scraper/run_yad2.py vm-scraper/run_yad2.sh ubuntu@129.159.158.214:/opt/pdis-fb-scraper/
+
+# On VM: make executable + install dependency
+ssh ubuntu@129.159.158.214
+chmod +x /opt/pdis-fb-scraper/run_yad2.sh
+pip install 'curl_cffi>=0.7'
+```
+
+### Test manually
+
+```bash
+ssh ubuntu@129.159.158.214
+cd /opt/pdis-fb-scraper
+./run_yad2.sh
+```
+
+Watch the output — verify presets are fetched, listings scraped, and backend returns HTTP 200.
+
+### Cron entry
+
+Add to VM crontab (`crontab -e`):
+
+```
+CRON_TZ=Asia/Jerusalem
+30 8,18 * * * flock -n /var/lock/pdis-yad2-scraper.lock /opt/pdis-fb-scraper/run_yad2.sh >> /var/log/pdis-yad2-scraper.log 2>&1
+```
+
+Note: runs 30 minutes after the rent scan (which runs at :00) to avoid DB contention.
+
+### Enable in production
+
+Set the following in Render environment variables:
+
+```
+YAD2_VM_INGESTION_ENABLED=true
+```
+
+Without this flag the `/api/ingest/yad2` endpoint returns 503 and no data is stored.
+`INGEST_SECRET` is the same secret used by the FB scraper — no separate secret needed.

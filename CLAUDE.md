@@ -247,3 +247,4 @@ FastAPI matches routes top-to-bottom. Path parameter routes (`{preset_id}`, `{ya
 - **Scheduled scans:** cron-job.org → `POST /api/scan/scheduled` with `CRON_SECRET`
 - **Build:** `pip install -r requirements.txt && cd frontend && npm install && npm run build`
 - **Start:** `uvicorn pdis.api.main:app --host 0.0.0.0 --port $PORT`
+- **Yad2 forsale scraping runs on Oracle VM** (not Render — Render's IP is blocked by ShieldSquare on /forsale). See vm-scraper/README.md.

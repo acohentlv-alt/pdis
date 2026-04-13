@@ -606,18 +606,19 @@ async def _mark_fb_removals_for_session(session_id: int) -> int:
     return len(removed_ids)
 
 
-async def run_scan_from_listings(preset_id: int, listings: list[ScrapedListing]) -> dict:
+async def run_scan_from_listings(preset_id: int, listings: list[ScrapedListing], source: str = "facebook") -> dict:
     """
-    Run full PDIS pipeline against pre-scraped listings (e.g., from Facebook ingest).
+    Run full PDIS pipeline against pre-scraped listings (e.g., from Facebook or Yad2 VM ingest).
     Skips the scrape step — listings are provided directly.
     """
-    log = logger.bind(preset_id=preset_id, source="facebook")
+    log = logger.bind(preset_id=preset_id, source=source)
 
-    # Low-volume guard: compare against prior active FB property count
+    # Low-volume guard: compare against prior active property count for this source
     async with _db.pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT COUNT(*) AS cnt FROM properties WHERE source = 'facebook' AND is_active = TRUE"
+                "SELECT COUNT(*) AS cnt FROM properties WHERE source = %s AND is_active = TRUE",
+                (source,),
             )
             row = await cur.fetchone()
             prior_count = row["cnt"] if row else 0
@@ -640,7 +641,7 @@ async def run_scan_from_listings(preset_id: int, listings: list[ScrapedListing])
 
     session_id = await _create_session(preset_id)
     log = log.bind(session_id=session_id)
-    log.info("scanner.fb_session_created")
+    log.info("scanner.ingest_session_created")
 
     new_count = 0
     event_count = 0
@@ -654,19 +655,19 @@ async def run_scan_from_listings(preset_id: int, listings: list[ScrapedListing])
         total, new_count = await _upsert_properties(listings, preset_id, session_id)
         await _create_snapshots(listings, session_id)
 
-        log.info("scanner.fb_upserted", total=total, new=new_count)
+        log.info("scanner.ingest_upserted", total=total, new=new_count)
 
         from pdis.events import detect_events
         from pdis.classification import persist_signals_batch
         from pdis.matching import find_matches, detect_customer_relistings, backfill_year_built_from_matches, backfill_year_built_from_buildings
 
         event_count = await detect_events(session_id, preset_id)
-        log.info("scanner.fb_events_detected", count=event_count)
+        log.info("scanner.ingest_events_detected", count=event_count)
 
         # Find property matches (before signal persistence so year backfills can use confirmed matches)
         match_count = await find_matches(session_id)
         if match_count > 0:
-            log.info("scanner.fb_matches_found", count=match_count)
+            log.info("scanner.ingest_matches_found", count=match_count)
 
         # Backfill year_built from matches and building_metadata before signal persistence
         property_ids = await _get_property_ids_for_session(session_id)
@@ -681,17 +682,19 @@ async def run_scan_from_listings(preset_id: int, listings: list[ScrapedListing])
 
         relist_count = await detect_customer_relistings(session_id)
         if relist_count > 0:
-            log.info("scanner.fb_customer_relistings", count=relist_count)
+            log.info("scanner.ingest_customer_relistings", count=relist_count)
 
-        # FB-scoped removals — AFTER matching (planner pass 4 R2)
-        removal_count = await _mark_fb_removals_for_session(session_id)
-        if removal_count > 0:
-            log.info("scanner.fb_removals_marked", count=removal_count)
+        # FB-scoped removals — AFTER matching. Yad2 per-preset scrapes cannot sweep
+        # the full source so removal detection is skipped for non-facebook sources.
+        if source == "facebook":
+            removal_count = await _mark_fb_removals_for_session(session_id)
+            if removal_count > 0:
+                log.info("scanner.fb_removals_marked", count=removal_count)
 
         await _record_preset_stats(preset_id, session_id)
 
     except Exception as exc:
-        log.error("scanner.fb_failed", error=str(exc))
+        log.error("scanner.ingest_failed", error=str(exc))
         status = "error"
         error_message = str(exc)
 

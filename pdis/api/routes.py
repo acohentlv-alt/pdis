@@ -1935,3 +1935,90 @@ async def fb_ingest(request: Request, body: FacebookIngestBody):
         await _reset_fb_warning_counter()
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Yad2 forsale ingestion (scraped on Oracle VM — Render is blocked by ShieldSquare)
+# ---------------------------------------------------------------------------
+
+class Yad2IngestListing(BaseModel):
+    yad2_id: str
+    category: str
+    address_street: str | None = None
+    address_home_number: str | None = None
+    address_city: str | None = None
+    neighborhood: str | None = None
+    rooms: float | None = None
+    floor: int | None = None
+    total_floors: int | None = None
+    square_meters: int | None = None
+    square_meter_build: int | None = None
+    price: int | None = None
+    currency: str = "ILS"
+    property_type: str | None = None
+    description: str | None = None
+    contact_name: str | None = None
+    contact_phone: str | None = None
+    year_built: int | None = None
+    yad2_date_added: str | None = None
+    source: str = "yad2"
+    latitude: float | None = None
+    longitude: float | None = None
+    parking: bool = False
+    elevator: bool = False
+    safe_room: bool = False
+    renovated: bool = False
+    balcony: bool = False
+    pets_allowed: bool = False
+    furnished: bool = False
+    air_conditioning: bool = False
+    is_agent: bool = False
+    agent_office: str | None = None
+    move_in_date: str | None = None
+    hood_id: int | None = None
+    customer_id: str | None = None
+    accessibility: bool = False
+    image_urls: list[str] = []
+    listing_url: str = ""
+
+
+class Yad2IngestBody(BaseModel):
+    preset_id: int
+    listings: list[Yad2IngestListing]
+
+
+@router.post("/api/ingest/yad2")
+async def yad2_ingest(request: Request, body: Yad2IngestBody):
+    """Receive scraped Yad2 forsale listings from the Oracle VM scraper."""
+    from pdis.config import settings
+
+    auth_header = request.headers.get("Authorization", "")
+    expected = f"Bearer {settings.ingest_secret}" if settings.ingest_secret else None
+    if not expected or auth_header != expected:
+        raise HTTPException(status_code=403, detail="Invalid or missing ingest secret")
+
+    if not getattr(settings, "yad2_vm_ingestion_enabled", False):
+        raise HTTPException(status_code=503, detail="Yad2 VM ingestion is disabled")
+
+    async with _db.pool.connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                "SELECT id, category, is_active FROM search_presets WHERE id = %s",
+                (body.preset_id,),
+            )
+            preset = await cur.fetchone()
+    if not preset:
+        raise HTTPException(status_code=404, detail=f"Preset {body.preset_id} not found")
+    if not preset["is_active"]:
+        raise HTTPException(status_code=400, detail=f"Preset {body.preset_id} is not active")
+    if preset["category"] != "forsale":
+        raise HTTPException(status_code=400, detail=f"Preset {body.preset_id} is not forsale")
+
+    listings: list[ScrapedListing] = []
+    for item in body.listings:
+        listings.append(ScrapedListing(**item.model_dump()))
+
+    logger.info("api.yad2_ingest_received", preset_id=body.preset_id, count=len(listings))
+
+    result = await run_scan_from_listings(body.preset_id, listings, source="yad2")
+    return result

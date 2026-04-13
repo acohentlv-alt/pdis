@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     ingest_secret: str = ""
     fb_ingestion_enabled: bool = False
     fb_scans_per_day: int = 2
+    yad2_vm_ingestion_enabled: bool = False
 
 
 settings = Settings()
