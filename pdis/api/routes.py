@@ -6,6 +6,7 @@ import json
 from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
+from psycopg.rows import dict_row
 from pydantic import BaseModel
 from typing import Optional
 
@@ -1857,3 +1858,88 @@ async def upsert_operator_input(yad2_id: str, body: OperatorInputBody):
             row = await cur.fetchone()
         await conn.commit()
     return dict(row)
+
+
+# ---------------------------------------------------------------------------
+# Neighborhood Thresholds (Amit Fit)
+# ---------------------------------------------------------------------------
+
+@router.get("/api/thresholds")
+async def list_thresholds(neighborhood: str | None = None, category: str = "forsale"):
+    async with _db.pool.connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            if neighborhood:
+                await cur.execute(
+                    """SELECT * FROM neighborhood_thresholds
+                       WHERE neighborhood = %s AND category = %s
+                       ORDER BY size_min""",
+                    (neighborhood, category),
+                )
+            else:
+                await cur.execute(
+                    "SELECT * FROM neighborhood_thresholds WHERE category = %s ORDER BY neighborhood, size_min",
+                    (category,),
+                )
+            rows = await cur.fetchall()
+    return {"thresholds": rows}
+
+
+@router.put("/api/thresholds")
+async def upsert_thresholds(request: Request):
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(400, "body must be a JSON object with a thresholds array")
+    rows_in = body.get("thresholds", [])
+    if not isinstance(rows_in, list) or not rows_in:
+        raise HTTPException(400, "thresholds must be a non-empty array")
+
+    for t in rows_in:
+        neighborhood = (t.get("neighborhood") or "").strip()
+        category = t.get("category", "forsale")
+        size_min = t.get("size_min")
+        size_max = t.get("size_max")
+        pref = t.get("target_price_per_sqm_preferred")
+        mx = t.get("target_price_per_sqm_max")
+        if not neighborhood:
+            raise HTTPException(400, "neighborhood is required")
+        if category not in ("forsale", "rent"):
+            raise HTTPException(400, f"invalid category: {category}")
+        if not isinstance(size_min, int) or not isinstance(size_max, int) or size_min < 0 or size_max <= size_min:
+            raise HTTPException(400, f"invalid size bucket: {size_min}-{size_max}")
+        if not isinstance(pref, int) or not isinstance(mx, int) or pref <= 0 or mx < pref:
+            raise HTTPException(400, f"invalid targets for bucket {size_min}-{size_max}: pref={pref} max={mx}")
+
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            for t in rows_in:
+                await cur.execute(
+                    """INSERT INTO neighborhood_thresholds
+                         (neighborhood, hood_id, category, size_min, size_max,
+                          target_price_per_sqm_preferred, target_price_per_sqm_max, updated_at)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                       ON CONFLICT (neighborhood, size_min, size_max, category)
+                       DO UPDATE SET
+                         hood_id = EXCLUDED.hood_id,
+                         target_price_per_sqm_preferred = EXCLUDED.target_price_per_sqm_preferred,
+                         target_price_per_sqm_max = EXCLUDED.target_price_per_sqm_max,
+                         updated_at = NOW()""",
+                    (
+                        t["neighborhood"].strip(), t.get("hood_id"), t.get("category", "forsale"),
+                        int(t["size_min"]), int(t["size_max"]),
+                        int(t["target_price_per_sqm_preferred"]), int(t["target_price_per_sqm_max"]),
+                    ),
+                )
+        await conn.commit()
+    return {"ok": True, "count": len(rows_in)}
+
+
+@router.delete("/api/thresholds/{threshold_id}")
+async def delete_threshold(threshold_id: int):
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM neighborhood_thresholds WHERE id = %s", (threshold_id,))
+            deleted = cur.rowcount
+        await conn.commit()
+    if deleted == 0:
+        raise HTTPException(404, "threshold not found")
+    return {"ok": True}

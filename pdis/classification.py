@@ -64,6 +64,7 @@ async def classify_batch(property_ids: list[int]) -> dict[int, str]:
                 signal_details = {
                     "strong_signals": strong,
                     "weak_signals": weak,
+                    "buyer_fit_tags": sig.get("buyer_fit_tags", []),
                     **sig["details"],
                 }
 

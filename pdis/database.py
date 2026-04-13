@@ -357,6 +357,34 @@ async def run_migrations() -> None:
                 "ALTER TABLE properties ADD COLUMN IF NOT EXISTS square_meter_build INTEGER"
             )
 
+            # Amit Fit: buyer threshold table per neighborhood/size bucket
+            await cur.execute("""
+                CREATE TABLE IF NOT EXISTS neighborhood_thresholds (
+                    id                               SERIAL PRIMARY KEY,
+                    neighborhood                     TEXT NOT NULL,
+                    hood_id                          INTEGER,
+                    category                         TEXT NOT NULL DEFAULT 'forsale',
+                    size_min                         INTEGER NOT NULL,
+                    size_max                         INTEGER NOT NULL,
+                    target_price_per_sqm_preferred   INTEGER NOT NULL,
+                    target_price_per_sqm_max         INTEGER NOT NULL,
+                    created_at                       TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at                       TIMESTAMPTZ DEFAULT NOW(),
+                    CONSTRAINT neighborhood_thresholds_unique
+                      UNIQUE (neighborhood, size_min, size_max, category),
+                    CONSTRAINT neighborhood_thresholds_valid_size
+                      CHECK (size_min >= 0 AND size_max > size_min),
+                    CONSTRAINT neighborhood_thresholds_valid_targets
+                      CHECK (target_price_per_sqm_preferred > 0 AND target_price_per_sqm_max >= target_price_per_sqm_preferred),
+                    CONSTRAINT neighborhood_thresholds_valid_category
+                      CHECK (category IN ('forsale', 'rent'))
+                )
+            """)
+            await cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_neighborhood_thresholds_lookup
+                  ON neighborhood_thresholds(neighborhood, hood_id, category)
+            """)
+
         await conn.commit()
     logger.info("db.migrations_done")
     await seed_presets()

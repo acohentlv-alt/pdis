@@ -11,8 +11,8 @@ logger = structlog.get_logger(__name__)
 async def compute_signals_batch(property_ids: list[int]) -> dict[int, dict]:
     """
     Compute distress signals for a batch of properties.
-    Uses BATCH queries (3 queries total, not per-property).
-    Returns {property_id: {"distress_score": float, "strong_signals": list, "weak_signals": list, "details": dict}}
+    Uses BATCH queries (4 queries total, not per-property).
+    Returns {property_id: {"distress_score": float, "strong_signals": list, "weak_signals": list, "buyer_fit_tags": list, "details": dict}}
     """
     if not property_ids:
         return {}
@@ -32,7 +32,8 @@ async def compute_signals_batch(property_ids: list[int]) -> dict[int, dict]:
             # BATCH QUERY 2: Property metadata
             await cur.execute(
                 """SELECT id, days_on_market, price, description,
-                          move_in_date, square_meters, neighborhood, is_agent, renovated, category
+                          move_in_date, square_meters, neighborhood, is_agent, renovated, category,
+                          hood_id
                    FROM properties
                    WHERE id = ANY(%s)""",
                 (property_ids,),
@@ -70,6 +71,21 @@ async def compute_signals_batch(property_ids: list[int]) -> dict[int, dict]:
             hood_avg_rows = await cur.fetchall()
             hood_avgs = {r["neighborhood"]: float(r["avg_price_sqm"]) for r in hood_avg_rows}
 
+            # BATCH QUERY 4: All neighborhood thresholds for buyer fit tagging
+            await cur.execute("SELECT * FROM neighborhood_thresholds")
+            threshold_rows = await cur.fetchall()
+
+    # Build threshold lookup dicts
+    by_hood_id: dict[tuple, list[dict]] = {}
+    by_name: dict[tuple, list[dict]] = {}
+    for row in threshold_rows:
+        r = dict(row)
+        if r.get("hood_id") is not None:
+            key = (r["hood_id"], r["category"])
+            by_hood_id.setdefault(key, []).append(r)
+        key_name = (r["neighborhood"], r["category"])
+        by_name.setdefault(key_name, []).append(r)
+
     # Group events by property
     events_by_prop: dict[int, list[dict]] = {}
     for row in event_rows:
@@ -84,7 +100,7 @@ async def compute_signals_batch(property_ids: list[int]) -> dict[int, dict]:
     for pid in property_ids:
         events = events_by_prop.get(pid, [])
         prop = props.get(pid, {})
-        results[pid] = _compute_single(pid, events, prop, hood_avgs)
+        results[pid] = _compute_single(pid, events, prop, hood_avgs, by_hood_id, by_name)
 
     return results
 
@@ -111,7 +127,14 @@ CONDITION_KEYWORDS = [
 ]
 
 
-def _compute_single(pid: int, events: list[dict], prop: dict, hood_avgs: dict) -> dict:
+def _compute_single(
+    pid: int,
+    events: list[dict],
+    prop: dict,
+    hood_avgs: dict,
+    by_hood_id: dict | None = None,
+    by_name: dict | None = None,
+) -> dict:
     """Compute tier-based signals for a single property. Pure function, no DB calls."""
     strong_signals = []
     weak_signals = []
@@ -213,9 +236,49 @@ def _compute_single(pid: int, events: list[dict], prop: dict, hood_avgs: dict) -
     if details["img_changes"] > 0:
         weak_signals.append("img_changes")
 
+    # === BUYER FIT TAGS (orthogonal — does not affect hot/warm/cold) ===
+    buyer_fit_tags = []
+    prop_category = prop.get("category")
+    prop_hood_id = prop.get("hood_id")
+    prop_neighborhood = prop.get("neighborhood")
+
+    if price > 0 and sqm > 0 and prop_category and (by_hood_id is not None or by_name is not None):
+        price_per_sqm = price / sqm
+        candidates = []
+        if prop_hood_id and by_hood_id is not None:
+            candidates.extend(by_hood_id.get((prop_hood_id, prop_category), []))
+        if prop_neighborhood and by_name is not None:
+            candidates.extend(by_name.get((prop_neighborhood, prop_category), []))
+        # Dedupe by row id
+        seen: set[int] = set()
+        unique_candidates = []
+        for r in candidates:
+            if r["id"] not in seen:
+                seen.add(r["id"])
+                unique_candidates.append(r)
+        # Find bucket matching sqm (size_min <= sqm < size_max)
+        bucket = next(
+            (r for r in unique_candidates if r["size_min"] <= sqm < r["size_max"]),
+            None,
+        )
+        if bucket:
+            pref = float(bucket["target_price_per_sqm_preferred"])
+            mx = float(bucket["target_price_per_sqm_max"])
+            if price_per_sqm <= pref:
+                buyer_fit_tags.append("below_amit_target")
+                details["amit_target_preferred"] = pref
+                details["amit_target_max"] = mx
+                details["amit_pct_vs_preferred"] = round(((price_per_sqm - pref) / pref) * 100, 1)
+            elif price_per_sqm <= mx:
+                buyer_fit_tags.append("close_to_amit_target")
+                details["amit_target_preferred"] = pref
+                details["amit_target_max"] = mx
+                details["amit_pct_vs_preferred"] = round(((price_per_sqm - pref) / pref) * 100, 1)
+
     return {
         "distress_score": 0.0,  # kept for DB compat, no longer used
         "strong_signals": strong_signals,
         "weak_signals": weak_signals,
+        "buyer_fit_tags": buyer_fit_tags,
         "details": details,
     }
