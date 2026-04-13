@@ -385,64 +385,90 @@ async def run_migrations() -> None:
                   ON neighborhood_thresholds(neighborhood, hood_id, category)
             """)
 
+            # Add FB columns to properties
+            for col_def in ["author_name TEXT", "group_url TEXT", "like_count INTEGER"]:
+                await cur.execute(f"ALTER TABLE properties ADD COLUMN IF NOT EXISTS {col_def}")
+
+            # Ingest state singleton table (tracks per-source health counters)
+            await cur.execute("""
+                CREATE TABLE IF NOT EXISTS ingest_state (
+                    source TEXT PRIMARY KEY,
+                    warning_count INTEGER NOT NULL DEFAULT 0,
+                    last_ok_at TIMESTAMPTZ,
+                    last_check_at TIMESTAMPTZ
+                )
+            """)
+            await cur.execute("INSERT INTO ingest_state (source) VALUES ('facebook') ON CONFLICT (source) DO NOTHING")
+
         await conn.commit()
     logger.info("db.migrations_done")
     await seed_presets()
 
 
 async def seed_presets() -> None:
-    """Insert default search presets if the table is empty."""
+    """Insert default search presets if the table is empty. Always seeds FB preset idempotently."""
     async with pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute("SELECT COUNT(*) AS cnt FROM search_presets")
             row = await cur.fetchone()
-            if row and row["cnt"] > 0:
-                return
 
-            presets = [
-                {
-                    "name": "TLV Rent - Golden",
-                    "category": "rent",
-                    "city_code": "5000",
-                    "neighborhood": "848,205,1483,1461,204,1519,1516,1520,1521",
-                    "min_price": None,
-                    "max_price": None,
-                    "min_rooms": None,
-                    "max_rooms": None,
-                },
-                {
-                    "name": "TLV Rent - Full Scan",
-                    "category": "rent",
-                    "city_code": "5000",
-                    "neighborhood": None,
-                    "min_price": None,
-                    "max_price": None,
-                    "min_rooms": None,
-                    "max_rooms": None,
-                },
-                {
-                    "name": "Haifa Buy",
-                    "category": "forsale",
-                    "city_code": "4000",
-                    "neighborhood": None,
-                    "min_price": None,
-                    "max_price": None,
-                    "min_rooms": None,
-                    "max_rooms": None,
-                },
-            ]
+            if not (row and row["cnt"] > 0):
+                presets = [
+                    {
+                        "name": "TLV Rent - Golden",
+                        "category": "rent",
+                        "city_code": "5000",
+                        "neighborhood": "848,205,1483,1461,204,1519,1516,1520,1521",
+                        "min_price": None,
+                        "max_price": None,
+                        "min_rooms": None,
+                        "max_rooms": None,
+                    },
+                    {
+                        "name": "TLV Rent - Full Scan",
+                        "category": "rent",
+                        "city_code": "5000",
+                        "neighborhood": None,
+                        "min_price": None,
+                        "max_price": None,
+                        "min_rooms": None,
+                        "max_rooms": None,
+                    },
+                    {
+                        "name": "Haifa Buy",
+                        "category": "forsale",
+                        "city_code": "4000",
+                        "neighborhood": None,
+                        "min_price": None,
+                        "max_price": None,
+                        "min_rooms": None,
+                        "max_rooms": None,
+                    },
+                ]
 
-            for p in presets:
+                for p in presets:
+                    await cur.execute(
+                        """
+                        INSERT INTO search_presets
+                            (name, category, city_code, neighborhood, min_price, max_price, min_rooms, max_rooms)
+                        VALUES
+                            (%(name)s, %(category)s, %(city_code)s, %(neighborhood)s,
+                             %(min_price)s, %(max_price)s, %(min_rooms)s, %(max_rooms)s)
+                        """,
+                        p,
+                    )
+
+            # Idempotent FB seed (runs every startup, regardless of table emptiness)
+            await cur.execute(
+                "SELECT id FROM search_presets WHERE extra_params->>'source' = 'facebook' LIMIT 1"
+            )
+            existing_fb = await cur.fetchone()
+            if not existing_fb:
                 await cur.execute(
-                    """
-                    INSERT INTO search_presets
-                        (name, category, city_code, neighborhood, min_price, max_price, min_rooms, max_rooms)
-                    VALUES
-                        (%(name)s, %(category)s, %(city_code)s, %(neighborhood)s,
-                         %(min_price)s, %(max_price)s, %(min_rooms)s, %(max_rooms)s)
-                    """,
-                    p,
+                    """INSERT INTO search_presets (name, category, city_code, extra_params)
+                       VALUES ('TLV Rent - Facebook', 'rent', '5000', '{"source": "facebook"}'::jsonb)"""
                 )
+
         await conn.commit()
     logger.info("db.presets_seeded")
 

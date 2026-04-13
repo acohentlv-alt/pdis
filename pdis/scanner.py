@@ -84,7 +84,8 @@ async def _upsert_properties(
                         parking, elevator, safe_room, renovated, balcony,
                         pets_allowed, furnished, air_conditioning,
                         is_agent, agent_office, move_in_date,
-                        hood_id, customer_id, accessibility
+                        hood_id, customer_id, accessibility,
+                        author_name, group_url, like_count
                     ) VALUES (
                         %(yad2_id)s, %(preset_id)s, %(category)s,
                         %(address_street)s, %(address_city)s, %(neighborhood)s,
@@ -98,7 +99,8 @@ async def _upsert_properties(
                         %(parking)s, %(elevator)s, %(safe_room)s, %(renovated)s, %(balcony)s,
                         %(pets_allowed)s, %(furnished)s, %(air_conditioning)s,
                         %(is_agent)s, %(agent_office)s, %(move_in_date)s,
-                        %(hood_id)s, %(customer_id)s, %(accessibility)s
+                        %(hood_id)s, %(customer_id)s, %(accessibility)s,
+                        %(author_name)s, %(group_url)s, %(like_count)s
                     )
                     ON CONFLICT (yad2_id) DO UPDATE SET
                         price           = EXCLUDED.price,
@@ -140,7 +142,10 @@ async def _upsert_properties(
                         move_in_date    = EXCLUDED.move_in_date,
                         hood_id         = EXCLUDED.hood_id,
                         customer_id     = EXCLUDED.customer_id,
-                        accessibility   = EXCLUDED.accessibility
+                        accessibility   = EXCLUDED.accessibility,
+                        author_name     = COALESCE(EXCLUDED.author_name, properties.author_name),
+                        group_url       = COALESCE(EXCLUDED.group_url, properties.group_url),
+                        like_count      = COALESCE(EXCLUDED.like_count, properties.like_count)
                     RETURNING (xmax = 0) AS is_insert
                     """,
                     {
@@ -183,6 +188,9 @@ async def _upsert_properties(
                         "hood_id": listing.hood_id,
                         "customer_id": listing.customer_id,
                         "accessibility": listing.accessibility,
+                        "author_name": listing.author_name,
+                        "group_url": listing.group_url,
+                        "like_count": listing.like_count,
                     },
                 )
                 row = await cur.fetchone()
@@ -502,6 +510,153 @@ async def run_scan(preset_id: int) -> dict:
         "events_detected": event_count,
         "matches_found": match_count,
         "customer_relistings": relist_count,
+    }
+
+
+async def _mark_fb_removals_for_session(session_id: int) -> int:
+    """
+    Mirror events.detect_removals but FB-scoped only.
+    Marks FB properties not seen in this session as removed.
+    Returns count of removed properties.
+    """
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            # Find FB properties that are active but not in this session's snapshots
+            await cur.execute(
+                """
+                SELECT id FROM properties
+                WHERE is_active = TRUE
+                  AND source = 'facebook'
+                  AND id NOT IN (
+                      SELECT property_id FROM property_snapshots WHERE session_id = %s
+                  )
+                """,
+                (session_id,),
+            )
+            removed_rows = await cur.fetchall()
+
+            if not removed_rows:
+                return 0
+
+            removed_ids = [r["id"] for r in removed_rows]
+
+            # Insert removal events (session_id = NULL for removals — mirrors events.py:155-159)
+            await cur.executemany(
+                """INSERT INTO property_events (property_id, session_id, event_type)
+                   VALUES (%s, NULL, 'removal')""",
+                [(rid,) for rid in removed_ids],
+            )
+
+            # Mark as inactive — mirrors events.py:163
+            await cur.execute(
+                """UPDATE properties SET is_active = FALSE, updated_at = NOW()
+                   WHERE id = ANY(%s)""",
+                (removed_ids,),
+            )
+
+        await conn.commit()
+
+    logger.info("scanner.fb_removals", session_id=session_id, count=len(removed_ids))
+    return len(removed_ids)
+
+
+async def run_scan_from_listings(preset_id: int, listings: list[ScrapedListing]) -> dict:
+    """
+    Run full PDIS pipeline against pre-scraped listings (e.g., from Facebook ingest).
+    Skips the scrape step — listings are provided directly.
+    """
+    log = logger.bind(preset_id=preset_id, source="facebook")
+
+    # Low-volume guard: compare against prior active FB property count
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT COUNT(*) AS cnt FROM properties WHERE source = 'facebook' AND is_active = TRUE"
+            )
+            row = await cur.fetchone()
+            prior_count = row["cnt"] if row else 0
+
+    # On first-ever ingest (prior_count=0) accept any non-empty batch;
+    # otherwise require at least max(10, 10% of prior) to reject scraper failures.
+    threshold = 1 if prior_count == 0 else max(10, int(prior_count * 0.1))
+    if len(listings) < threshold:
+        log.warning(
+            "scanner.fb_suspicious_low_volume",
+            received=len(listings),
+            prior_count=prior_count,
+            threshold=threshold,
+        )
+        return {
+            "status": "suspicious_low_volume",
+            "received": len(listings),
+            "prior_count": prior_count,
+        }
+
+    session_id = await _create_session(preset_id)
+    log = log.bind(session_id=session_id)
+    log.info("scanner.fb_session_created")
+
+    new_count = 0
+    event_count = 0
+    match_count = 0
+    relist_count = 0
+    removal_count = 0
+    status = "done"
+    error_message = None
+
+    try:
+        total, new_count = await _upsert_properties(listings, preset_id, session_id)
+        await _create_snapshots(listings, session_id)
+
+        log.info("scanner.fb_upserted", total=total, new=new_count)
+
+        from pdis.events import detect_events
+        from pdis.classification import classify_batch
+        from pdis.matching import find_matches, detect_customer_relistings
+
+        event_count = await detect_events(session_id, preset_id)
+        log.info("scanner.fb_events_detected", count=event_count)
+
+        property_ids = await _get_property_ids_for_session(session_id)
+        if property_ids:
+            await classify_batch(property_ids)
+            log.info("scanner.fb_classified", count=len(property_ids))
+
+        match_count = await find_matches(session_id)
+        if match_count > 0:
+            log.info("scanner.fb_matches_found", count=match_count)
+
+        relist_count = await detect_customer_relistings(session_id)
+        if relist_count > 0:
+            log.info("scanner.fb_customer_relistings", count=relist_count)
+
+        # FB-scoped removals — AFTER matching (planner pass 4 R2)
+        removal_count = await _mark_fb_removals_for_session(session_id)
+        if removal_count > 0:
+            log.info("scanner.fb_removals_marked", count=removal_count)
+
+        await _record_preset_stats(preset_id, session_id)
+
+    except Exception as exc:
+        log.error("scanner.fb_failed", error=str(exc))
+        status = "error"
+        error_message = str(exc)
+
+    finally:
+        result = ScrapeResult(listings=listings)
+        await _finish_session(session_id, result, new_count, status=status, error_message=error_message)
+
+    return {
+        "session_id": session_id,
+        "preset_id": preset_id,
+        "status": status,
+        "listings_found": len(listings),
+        "new_listings": new_count,
+        "events_detected": event_count,
+        "matches_found": match_count,
+        "customer_relistings": relist_count,
+        "removals": removal_count,
+        "error_message": error_message,
     }
 
 

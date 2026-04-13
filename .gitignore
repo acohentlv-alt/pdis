@@ -7,3 +7,9 @@ build/
 .venv/
 frontend/node_modules/
 frontend/dist/
+
+# VM scraper secrets — never commit
+vm-scraper/state.json
+vm-scraper/fb_state.json
+vm-scraper/.env
+vm-scraper/.consecutive_empty

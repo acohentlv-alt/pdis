@@ -35,6 +35,15 @@ python3 -m uvicorn pdis.api.main:app --port 8000 --reload
 
 ---
 
+## Tools Available to Claude
+
+**GitHub MCP server** is configured globally in `~/.claude.json` (user scope, added 2026-04-13). For any GitHub repo lookups — pull requests, issues, file contents at a specific commit/branch, commit history — call the `github` MCP tools instead of shelling out to `git`/`gh` or cloning. MCP returns only what you ask for, which keeps token usage down.
+
+Token reuses `gh auth token` (scopes: `repo, gist, read:org, workflow`). If it stops working, rerun:
+`TOKEN=$(gh auth token) && claude mcp add github -s user -e GITHUB_PERSONAL_ACCESS_TOKEN="$TOKEN" -- npx -y @modelcontextprotocol/server-github`
+
+---
+
 ## Architecture
 
 ### Backend (Python FastAPI)

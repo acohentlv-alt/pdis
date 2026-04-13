@@ -14,7 +14,8 @@ import structlog
 
 import pdis.database as _db
 from pdis.database import check_connection
-from pdis.scanner import run_scan, run_all_scans
+from pdis.models import ScrapedListing
+from pdis.scanner import run_scan, run_all_scans, run_scan_from_listings
 from pdis.signals import compute_signals_batch
 from pdis.classification import classify_batch
 
@@ -1943,3 +1944,202 @@ async def delete_threshold(threshold_id: int):
     if deleted == 0:
         raise HTTPException(404, "threshold not found")
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Facebook ingestion
+# IMPORTANT: /api/ingest/facebook/health and /api/ingest/facebook/log-reveal
+# must be registered BEFORE any path-param routes to avoid capture issues.
+# ---------------------------------------------------------------------------
+
+# City string used as default address_city for all FB posts.
+# TODO: verify "תל אביב-יפו" matches the exact string in prod DB before flipping
+# FB_INGESTION_ENABLED=true (Step 0a deferred).
+TLV_CITY_STRING = "תל אביב-יפו"
+
+GROUP_CITY_MAP = {
+    "458499457501175": TLV_CITY_STRING,
+    "RentinTLV": TLV_CITY_STRING,
+    "333022240594651": TLV_CITY_STRING,
+    "305724686290054": TLV_CITY_STRING,
+    "457465901082882": TLV_CITY_STRING,
+}
+
+
+class FacebookPost(BaseModel):
+    post_id: str
+    group_url: str
+    group_id: str
+    author_name: str | None = None
+    posted_at: str | None = None
+    description: str
+    contact_phone: str | None = None
+    price: int | None = None
+    rooms: float | None = None
+    neighborhood: str | None = None
+    address_city: str | None = None
+    image_urls: list[str] = []
+    like_count: int | None = None
+    listing_url: str
+
+
+class FacebookIngestBody(BaseModel):
+    posts: list[FacebookPost]
+
+
+class LogRevealBody(BaseModel):
+    yad2_id: str
+
+
+async def _get_facebook_preset_id() -> int | None:
+    """Return the search_preset id for the FB source preset, or None if not found."""
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT id FROM search_presets WHERE extra_params->>'source' = 'facebook' LIMIT 1"
+            )
+            row = await cur.fetchone()
+    return row["id"] if row else None
+
+
+async def _bump_fb_warning_counter() -> None:
+    """Increment the FB ingest warning counter and record check time."""
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE ingest_state SET warning_count = warning_count + 1, last_check_at = NOW() WHERE source = 'facebook'"
+            )
+        await conn.commit()
+
+
+async def _reset_fb_warning_counter() -> None:
+    """Reset the FB ingest warning counter and record last successful check."""
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE ingest_state SET warning_count = 0, last_ok_at = NOW(), last_check_at = NOW() WHERE source = 'facebook'"
+            )
+        await conn.commit()
+
+
+async def _fb_post_to_listing(post: FacebookPost) -> ScrapedListing | None:
+    """
+    Convert a FacebookPost to a ScrapedListing.
+    Returns None if the post should be skipped (empty description AND no phone).
+    """
+    # Skip only if both description is empty AND no phone
+    if not post.description.strip() and post.contact_phone is None:
+        return None
+
+    address_city = GROUP_CITY_MAP.get(post.group_id, TLV_CITY_STRING)
+
+    return ScrapedListing(
+        yad2_id=f"fb_{post.post_id}",
+        source="facebook",
+        category="rent",
+        address_street=None,
+        address_city=address_city,
+        neighborhood=post.neighborhood,
+        rooms=post.rooms,
+        floor=None,
+        total_floors=None,
+        square_meters=None,
+        square_meter_build=None,
+        price=post.price,
+        currency="ILS",
+        property_type=None,
+        description=post.description,
+        contact_name=post.author_name,
+        contact_phone=post.contact_phone,
+        image_urls=post.image_urls,
+        listing_url=post.listing_url,
+        yad2_date_added=post.posted_at,
+        author_name=post.author_name,
+        group_url=post.group_url,
+        like_count=post.like_count,
+    )
+
+
+@router.get("/api/ingest/facebook/health")
+async def fb_ingest_health():
+    """Return FB ingest health state. Unauthed — safe to expose."""
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT warning_count, last_ok_at, last_check_at FROM ingest_state WHERE source = 'facebook'"
+            )
+            row = await cur.fetchone()
+
+    if not row:
+        return {"warning_count": 0, "last_ok_at": None, "last_check_at": None, "alert": False}
+
+    warning_count = row["warning_count"]
+    last_ok_at = row["last_ok_at"].isoformat() if row["last_ok_at"] else None
+    last_check_at = row["last_check_at"].isoformat() if row["last_check_at"] else None
+    return {
+        "warning_count": warning_count,
+        "last_ok_at": last_ok_at,
+        "last_check_at": last_check_at,
+        "alert": warning_count >= 2,
+    }
+
+
+@router.post("/api/ingest/facebook/log-reveal")
+async def fb_log_reveal(body: LogRevealBody):
+    """Log a phone reveal event for a FB property. Unauthed."""
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT id FROM properties WHERE yad2_id = %s",
+                (body.yad2_id,),
+            )
+            prop = await cur.fetchone()
+            if not prop:
+                raise HTTPException(status_code=404, detail="Property not found")
+
+            await cur.execute(
+                "INSERT INTO operator_notes (property_id, note, created_by) VALUES (%s, 'phone_revealed', 'system')",
+                (prop["id"],),
+            )
+        await conn.commit()
+    return {"status": "logged"}
+
+
+@router.post("/api/ingest/facebook")
+async def fb_ingest(request: Request, body: FacebookIngestBody):
+    """Receive scraped FB posts from the Oracle VM scraper and run the full scan pipeline."""
+    from pdis.config import settings
+
+    # Bearer auth against INGEST_SECRET
+    auth_header = request.headers.get("Authorization", "")
+    expected = f"Bearer {settings.ingest_secret}"
+    if not settings.ingest_secret or auth_header != expected:
+        raise HTTPException(status_code=403, detail="Invalid or missing ingest secret")
+
+    # Feature flag gate
+    if not settings.fb_ingestion_enabled:
+        raise HTTPException(status_code=503, detail="Facebook ingestion is disabled")
+
+    # Resolve FB preset
+    preset_id = await _get_facebook_preset_id()
+    if preset_id is None:
+        raise HTTPException(status_code=500, detail="Facebook preset not found — migration may not have run")
+
+    # Build ScrapedListings, skipping posts with empty description AND no phone
+    listings: list[ScrapedListing] = []
+    for post in body.posts:
+        listing = await _fb_post_to_listing(post)
+        if listing is not None:
+            listings.append(listing)
+
+    logger.info("api.fb_ingest_received", total_posts=len(body.posts), valid_listings=len(listings))
+
+    result = await run_scan_from_listings(preset_id, listings)
+
+    # Bump or reset warning counter based on outcome
+    if result.get("status") == "suspicious_low_volume":
+        await _bump_fb_warning_counter()
+    elif result.get("status") == "done":
+        await _reset_fb_warning_counter()
+
+    return result

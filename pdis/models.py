@@ -38,6 +38,9 @@ class ScrapedListing:
     hood_id: int | None = None
     customer_id: str | None = None
     accessibility: bool = False
+    author_name: str | None = None
+    group_url: str | None = None
+    like_count: int | None = None
     image_urls: list[str] = field(default_factory=list)
     listing_url: str = ""
     raw_data: dict = field(default_factory=dict)
