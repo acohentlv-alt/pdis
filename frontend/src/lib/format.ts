@@ -42,8 +42,3 @@ export const SIGNAL_LABELS: Record<string, string> = {
   img_changes: "Images changed",
 };
 
-export const CLASSIFICATION_STYLES: Record<string, { bg: string; label: string; icon: string }> = {
-  hot: { bg: "bg-red-500", label: "Hot", icon: "🔥" },
-  warm: { bg: "bg-orange-400", label: "Warm", icon: "⚠️" },
-  cold: { bg: "bg-gray-400", label: "Cold", icon: "❌" },
-};

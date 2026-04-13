@@ -48,14 +48,6 @@ def test_properties(client):
     assert "page" in data
 
 
-def test_stats(client):
-    r = client.get("/api/stats")
-    assert r.status_code == 200
-    data = r.json()
-    assert "total_properties" in data
-    assert "active_properties" in data
-
-
 def test_property_not_found(client):
     r = client.get("/api/properties/nonexistent_id_xyz")
     assert r.status_code == 404

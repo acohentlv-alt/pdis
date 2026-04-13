@@ -180,16 +180,12 @@ async def run_migrations() -> None:
                     id              SERIAL PRIMARY KEY,
                     property_id     INTEGER NOT NULL UNIQUE REFERENCES properties(id),
                     classification  TEXT NOT NULL DEFAULT 'cold',
-                    distress_score  REAL NOT NULL DEFAULT 0.0,
                     signal_details  JSONB DEFAULT '{}',
                     updated_at      TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
             await cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_classifications_class ON property_classifications(classification)"
-            )
-            await cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_classifications_score ON property_classifications(distress_score)"
             )
 
             await cur.execute("""
@@ -261,7 +257,6 @@ async def run_migrations() -> None:
                     removals        INTEGER DEFAULT 0,
                     price_drops     INTEGER DEFAULT 0,
                     price_increases INTEGER DEFAULT 0,
-                    opportunities   INTEGER DEFAULT 0,
                     created_at      TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
@@ -467,6 +462,11 @@ async def run_migrations() -> None:
                 )
             """)
             await cur.execute("INSERT INTO ingest_state (source) VALUES ('facebook') ON CONFLICT (source) DO NOTHING")
+
+            # Cleanup migrations — idempotent, removes stale columns/indexes
+            await cur.execute("DROP INDEX IF EXISTS idx_classifications_score")
+            await cur.execute("ALTER TABLE property_classifications DROP COLUMN IF EXISTS distress_score")
+            await cur.execute("ALTER TABLE scan_preset_stats DROP COLUMN IF EXISTS opportunities")
 
         await conn.commit()
     logger.info("db.migrations_done")

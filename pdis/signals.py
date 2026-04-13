@@ -82,7 +82,7 @@ async def compute_signals_batch(property_ids: list[int]) -> dict[int, dict]:
     """
     Compute distress signals for a batch of properties.
     Uses BATCH queries (4 queries total, not per-property).
-    Returns {property_id: {"distress_score": float, "strong_signals": list, "weak_signals": list, "buyer_fit_tags": list, "details": dict}}
+    Returns {property_id: {"strong_signals": list, "weak_signals": list, "buyer_fit_tags": list, "details": dict}}
     """
     if not property_ids:
         return {}
@@ -444,7 +444,6 @@ def _compute_single(
                 details["amit_pct_vs_preferred"] = round((price - pref_total_adj) / pref_total_adj * 100, 1)
 
     return {
-        "distress_score": 0.0,  # kept for DB compat, no longer used
         "strong_signals": strong_signals,
         "weak_signals": weak_signals,
         "buyer_fit_tags": buyer_fit_tags,

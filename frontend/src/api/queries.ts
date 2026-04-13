@@ -1,39 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from './client';
 
-export function useStats(category?: string) {
-  const url = category ? `/api/stats?category=${category}` : '/api/stats';
-  return useQuery({
-    queryKey: ['stats', category],
-    queryFn: () => apiFetch<Record<string, unknown>>(url),
-  });
-}
-
 export function usePresetStats(category?: string) {
   const url = category ? `/api/presets/stats/latest?category=${category}` : '/api/presets/stats/latest';
   return useQuery({
     queryKey: ['presetStats', category],
     queryFn: () => apiFetch<{ presets: Record<string, unknown>[] }>(url),
-  });
-}
-
-export function useOpportunities(category?: string) {
-  const url = category
-    ? `/api/opportunities?category=${category}&per_page=500`
-    : '/api/opportunities?per_page=500';
-  return useQuery({
-    queryKey: ['opportunities', category],
-    queryFn: () => apiFetch<{ total: number; opportunities: Record<string, unknown>[] }>(url),
-  });
-}
-
-export function useClassifications(category?: string, classification?: string) {
-  const params = new URLSearchParams({ per_page: '500' });
-  if (category) params.set('category', category);
-  if (classification) params.set('classification', classification);
-  return useQuery({
-    queryKey: ['classifications', category, classification],
-    queryFn: () => apiFetch<{ total: number; classifications: Record<string, unknown>[] }>(`/api/classifications?${params}`),
   });
 }
 

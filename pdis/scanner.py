@@ -320,27 +320,17 @@ async def _record_preset_stats(preset_id: int, session_id: int) -> None:
             )
             active_count = (await cur.fetchone())["cnt"]
 
-            # Count opportunities (hot+warm) for this preset
-            await cur.execute(
-                """SELECT COUNT(*) as cnt FROM property_classifications pc
-                   JOIN properties p ON p.id = pc.property_id
-                   WHERE p.preset_id = %s AND pc.classification IN ('hot', 'warm')""",
-                (preset_id,),
-            )
-            opp_count = (await cur.fetchone())["cnt"]
-
             await cur.execute(
                 """INSERT INTO scan_preset_stats
                    (preset_id, session_id, total_active, new_listings, removals,
-                    price_drops, price_increases, opportunities)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                    price_drops, price_increases)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
                 (
                     preset_id, session_id, active_count,
                     event_counts.get("new_listing", 0),
                     event_counts.get("removal", 0),
                     event_counts.get("price_drop", 0),
                     event_counts.get("price_increase", 0),
-                    opp_count,
                 ),
             )
         await conn.commit()
@@ -512,28 +502,28 @@ async def run_scan(preset_id: int) -> dict:
             await _backfill_built_sqm(result.listings, log)
 
         from pdis.events import detect_events
-        from pdis.classification import classify_batch
+        from pdis.classification import persist_signals_batch
         from pdis.matching import find_matches, detect_customer_relistings, backfill_year_built_from_matches, backfill_year_built_from_buildings
 
         # Detect events by comparing to previous snapshots
         event_count = await detect_events(session_id, preset_id)
         log.info("scanner.events_detected", count=event_count)
 
-        # Find property matches (before classification so year backfills can use confirmed matches)
+        # Find property matches (before signal persistence so year backfills can use confirmed matches)
         match_count = await find_matches(session_id)
         if match_count > 0:
             log.info("scanner.matches_found", count=match_count)
 
-        # Backfill year_built from matches and building_metadata before classification
+        # Backfill year_built from matches and building_metadata before signal persistence
         property_ids = await _get_property_ids_for_session(session_id)
         if property_ids:
             await backfill_year_built_from_matches(property_ids)
             await backfill_year_built_from_buildings(property_ids)
 
-        # Classify all properties seen in this scan (after year backfills)
+        # Persist signals for all properties seen in this scan (after year backfills)
         if property_ids:
-            await classify_batch(property_ids)
-            log.info("scanner.classified", count=len(property_ids))
+            await persist_signals_batch(property_ids)
+            log.info("scanner.signals_persisted", count=len(property_ids))
 
         relist_count = await detect_customer_relistings(session_id)
         if relist_count > 0:
@@ -667,27 +657,27 @@ async def run_scan_from_listings(preset_id: int, listings: list[ScrapedListing])
         log.info("scanner.fb_upserted", total=total, new=new_count)
 
         from pdis.events import detect_events
-        from pdis.classification import classify_batch
+        from pdis.classification import persist_signals_batch
         from pdis.matching import find_matches, detect_customer_relistings, backfill_year_built_from_matches, backfill_year_built_from_buildings
 
         event_count = await detect_events(session_id, preset_id)
         log.info("scanner.fb_events_detected", count=event_count)
 
-        # Find property matches (before classification so year backfills can use confirmed matches)
+        # Find property matches (before signal persistence so year backfills can use confirmed matches)
         match_count = await find_matches(session_id)
         if match_count > 0:
             log.info("scanner.fb_matches_found", count=match_count)
 
-        # Backfill year_built from matches and building_metadata before classification
+        # Backfill year_built from matches and building_metadata before signal persistence
         property_ids = await _get_property_ids_for_session(session_id)
         if property_ids:
             await backfill_year_built_from_matches(property_ids)
             await backfill_year_built_from_buildings(property_ids)
 
-        # Classify all properties seen in this scan (after year backfills)
+        # Persist signals for all properties seen in this scan (after year backfills)
         if property_ids:
-            await classify_batch(property_ids)
-            log.info("scanner.fb_classified", count=len(property_ids))
+            await persist_signals_batch(property_ids)
+            log.info("scanner.signals_persisted", count=len(property_ids))
 
         relist_count = await detect_customer_relistings(session_id)
         if relist_count > 0:

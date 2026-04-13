@@ -17,7 +17,6 @@ from pdis.database import check_connection
 from pdis.models import ScrapedListing
 from pdis.scanner import run_scan, run_all_scans, run_scan_from_listings
 from pdis.signals import compute_signals_batch
-from pdis.classification import classify_batch
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
@@ -108,7 +107,7 @@ async def get_latest_preset_stats(category: str | None = Query(default=None)):
                     sps.preset_id, sp.name AS preset_name,
                     sps.session_id, sps.total_active, sps.new_listings,
                     sps.removals, sps.price_drops, sps.price_increases,
-                    sps.opportunities, sps.created_at
+                    sps.created_at
                 FROM scan_preset_stats sps
                 JOIN search_presets sp ON sp.id = sps.preset_id
                 WHERE TRUE
@@ -205,7 +204,6 @@ async def get_preset_properties(
                 f"""
                 SELECT
                     p.*,
-                    pc.classification,
                     pc.signal_details,
                     (
                         SELECT ARRAY_AGG(DISTINCT p2.source)
@@ -244,7 +242,7 @@ async def get_preset_stats(preset_id: int):
             await cur.execute(
                 """
                 SELECT session_id, total_active, new_listings, removals,
-                       price_drops, price_increases, opportunities, created_at
+                       price_drops, price_increases, created_at
                 FROM scan_preset_stats
                 WHERE preset_id = %s
                 ORDER BY created_at DESC
@@ -670,7 +668,7 @@ async def search_properties(q: str = "", category: str | None = Query(default=No
             await cur.execute(
                 f"""
                 SELECT p.*,
-                       pc.classification, pc.signal_details
+                       pc.signal_details
                 FROM properties p
                 LEFT JOIN property_classifications pc ON pc.property_id = p.id
                 WHERE (
@@ -682,8 +680,7 @@ async def search_properties(q: str = "", category: str | None = Query(default=No
                    OR CONCAT(p.address_street, ' ', p.address_home_number) ILIKE %s
                 )
                 {category_clause}
-                ORDER BY CASE pc.classification WHEN 'hot' THEN 1 WHEN 'warm' THEN 2 ELSE 3 END,
-                         p.updated_at DESC
+                ORDER BY p.updated_at DESC
                 LIMIT 100
                 """,
                 tuple(params_list),
@@ -719,7 +716,7 @@ async def get_property(yad2_id: str):
 
             await cur.execute(
                 """
-                SELECT classification, distress_score, signal_details, updated_at
+                SELECT signal_details, updated_at
                 FROM property_classifications
                 WHERE property_id = %s
                 """,
@@ -865,7 +862,7 @@ async def get_event_properties(
             await cur.execute(
                 f"""
                 SELECT DISTINCT ON (p.id)
-                    pc.*, p.*,
+                    pc.signal_details, p.*,
                     (SELECT ARRAY_AGG(DISTINCT p2.source)
                      FROM property_matches pm
                      JOIN properties p2 ON p2.id = CASE
@@ -1170,155 +1167,10 @@ async def get_property_signals(yad2_id: str):
 
     property_id = prop["id"]
     signals = await compute_signals_batch([property_id])
-    sig = signals.get(property_id, {"distress_score": 0.0, "details": {}})
+    sig = signals.get(property_id, {"details": {}})
     return {
         "property_id": property_id,
-        "distress_score": sig["distress_score"],
         "details": sig["details"],
-    }
-
-
-# ---------------------------------------------------------------------------
-# Classifications
-# ---------------------------------------------------------------------------
-
-@router.get("/api/classifications")
-async def list_classifications(
-    classification: str | None = Query(default=None),
-    min_score: float | None = Query(default=None),
-    category: str | None = Query(default=None),
-    page: int = Query(default=1, ge=1),
-    per_page: int = Query(default=50, ge=1, le=1000),
-):
-    conditions = []
-    params: list = []
-
-    if classification is not None:
-        conditions.append("pc.classification = %s")
-        params.append(classification)
-    if min_score is not None:
-        conditions.append("pc.distress_score >= %s")
-        params.append(min_score)
-    if category is not None:
-        conditions.append("p.category = %s")
-        params.append(category)
-
-    where = "WHERE " + " AND ".join(conditions) if conditions else ""
-    offset = (page - 1) * per_page
-
-    async with _db.pool.connection() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute(
-                f"""
-                SELECT COUNT(*) AS total
-                FROM property_classifications pc
-                JOIN properties p ON p.id = pc.property_id
-                {where}
-                """,
-                params,
-            )
-            count_row = await cur.fetchone()
-            total = count_row["total"] if count_row else 0
-
-            await cur.execute(
-                f"""
-                SELECT pc.*, p.yad2_id, p.address_street, p.address_city,
-                       p.address_home_number, p.price, p.rooms, p.neighborhood, p.days_on_market,
-                       p.square_meters, p.image_urls, p.listing_url,
-                       p.is_agent, p.parking, p.elevator, p.air_conditioning,
-                       p.source, p.description, p.contact_name,
-                       (SELECT ARRAY_AGG(DISTINCT p2.source)
-                        FROM property_matches pm
-                        JOIN properties p2 ON p2.id = CASE
-                            WHEN pm.property_id_a = p.id THEN pm.property_id_b
-                            ELSE pm.property_id_a END
-                        WHERE pm.property_id_a = p.id OR pm.property_id_b = p.id
-                       ) AS matched_sources
-                FROM property_classifications pc
-                JOIN properties p ON p.id = pc.property_id
-                {where}
-                ORDER BY CASE pc.classification
-                    WHEN 'hot' THEN 1
-                    WHEN 'warm' THEN 2
-                    ELSE 3
-                END, pc.updated_at DESC
-                LIMIT %s OFFSET %s
-                """,
-                params + [per_page, offset],
-            )
-            rows = await cur.fetchall()
-
-    return {
-        "total": total,
-        "page": page,
-        "per_page": per_page,
-        "classifications": [dict(r) for r in rows],
-    }
-
-
-@router.get("/api/opportunities")
-async def list_opportunities(
-    page: int = Query(default=1, ge=1),
-    per_page: int = Query(default=50, ge=1, le=1000),
-    category: str | None = Query(default=None),
-):
-    offset = (page - 1) * per_page
-    category_clause = ""
-    count_params: list = []
-    if category:
-        category_clause = "AND p.category = %s"
-        count_params.append(category)
-
-    async with _db.pool.connection() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute(
-                f"""
-                SELECT COUNT(*) AS total
-                FROM property_classifications pc
-                JOIN properties p ON p.id = pc.property_id
-                LEFT JOIN blacklist bl ON bl.property_id = pc.property_id
-                WHERE pc.classification IN ('hot', 'warm')
-                  AND bl.id IS NULL
-                {category_clause}
-                """,
-                tuple(count_params),
-            )
-            count_row = await cur.fetchone()
-            total = count_row["total"] if count_row else 0
-
-            main_params: list = list(count_params)
-            await cur.execute(
-                f"""
-                SELECT pc.*, p.*,
-                       (SELECT ARRAY_AGG(DISTINCT p2.source)
-                        FROM property_matches pm
-                        JOIN properties p2 ON p2.id = CASE
-                            WHEN pm.property_id_a = p.id THEN pm.property_id_b
-                            ELSE pm.property_id_a END
-                        WHERE pm.property_id_a = p.id OR pm.property_id_b = p.id
-                       ) AS matched_sources
-                FROM property_classifications pc
-                JOIN properties p ON p.id = pc.property_id
-                LEFT JOIN blacklist bl ON bl.property_id = pc.property_id
-                WHERE pc.classification IN ('hot', 'warm')
-                  AND bl.id IS NULL
-                {category_clause}
-                ORDER BY CASE pc.classification
-                    WHEN 'hot' THEN 1
-                    WHEN 'warm' THEN 2
-                    ELSE 3
-                END, pc.updated_at DESC
-                LIMIT %s OFFSET %s
-                """,
-                tuple(main_params) + (per_page, offset),
-            )
-            rows = await cur.fetchall()
-
-    return {
-        "total": total,
-        "page": page,
-        "per_page": per_page,
-        "opportunities": [dict(r) for r in rows],
     }
 
 
@@ -1355,7 +1207,7 @@ async def list_whitelist():
     async with _db.pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute("""
-                SELECT p.*, pc.classification, pc.distress_score, pc.signal_details,
+                SELECT p.*, pc.signal_details,
                        (SELECT ARRAY_AGG(DISTINCT p2.source)
                         FROM property_matches pm
                         JOIN properties p2 ON p2.id = CASE
@@ -1377,7 +1229,7 @@ async def list_blacklist():
     async with _db.pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute("""
-                SELECT p.*, pc.classification, pc.distress_score, pc.signal_details,
+                SELECT p.*, pc.signal_details,
                        (SELECT ARRAY_AGG(DISTINCT p2.source)
                         FROM property_matches pm
                         JOIN properties p2 ON p2.id = CASE
@@ -1420,7 +1272,6 @@ async def add_to_whitelist(yad2_id: str, body: ListReason = ListReason()):
             )
         await conn.commit()
 
-    await classify_batch([property_id])
     return {"status": "added", "property_id": property_id}
 
 
@@ -1444,7 +1295,6 @@ async def remove_from_whitelist(yad2_id: str):
             )
         await conn.commit()
 
-    await classify_batch([property_id])
     return {"status": "removed"}
 
 
@@ -1470,7 +1320,6 @@ async def add_to_blacklist(yad2_id: str, body: ListReason = ListReason()):
             )
         await conn.commit()
 
-    await classify_batch([property_id])
     return {"status": "added", "property_id": property_id}
 
 
@@ -1494,7 +1343,6 @@ async def remove_from_blacklist(yad2_id: str):
             )
         await conn.commit()
 
-    await classify_batch([property_id])
     return {"status": "removed"}
 
 
@@ -1520,7 +1368,7 @@ async def list_favorites():
     async with _db.pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute("""
-                SELECT p.*, pc.classification, pc.distress_score, pc.signal_details,
+                SELECT p.*, pc.signal_details,
                        p.source,
                        (SELECT ARRAY_AGG(DISTINCT p2.source)
                         FROM property_matches pm
@@ -1615,167 +1463,6 @@ async def get_session_changes(session_id: int):
         "session_id": session_id,
         "events": events,
         "summary": summary,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Stats
-# ---------------------------------------------------------------------------
-
-@router.get("/api/stats")
-async def get_stats(category: str | None = Query(default=None)):
-    cat_filter = "AND category = %s" if category else ""
-    cat_param = (category,) if category else ()
-
-    async with _db.pool.connection() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute(
-                f"SELECT COUNT(*) AS total_properties FROM properties WHERE TRUE {cat_filter}",
-                cat_param,
-            )
-            total_row = await cur.fetchone()
-
-            await cur.execute(
-                f"SELECT COUNT(*) AS active_properties FROM properties WHERE is_active = TRUE {cat_filter}",
-                cat_param,
-            )
-            active_row = await cur.fetchone()
-
-            await cur.execute(
-                "SELECT COUNT(*) AS total_sessions FROM scan_sessions"
-            )
-            sessions_row = await cur.fetchone()
-
-            await cur.execute(
-                "SELECT COUNT(*) AS total_snapshots FROM property_snapshots"
-            )
-            snaps_row = await cur.fetchone()
-
-            await cur.execute(
-                f"""
-                SELECT AVG(price) AS avg_price, MIN(price) AS min_price, MAX(price) AS max_price
-                FROM properties
-                WHERE is_active = TRUE AND price IS NOT NULL
-                {cat_filter}
-                """,
-                cat_param,
-            )
-            price_row = await cur.fetchone()
-
-            await cur.execute(
-                f"""
-                SELECT AVG(days_on_market) AS avg_days_on_market
-                FROM properties
-                WHERE is_active = TRUE
-                {cat_filter}
-                """,
-                cat_param,
-            )
-            dom_row = await cur.fetchone()
-
-            await cur.execute(
-                """
-                SELECT status, COUNT(*) AS cnt
-                FROM scan_sessions
-                GROUP BY status
-                """
-            )
-            session_status_rows = await cur.fetchall()
-
-            if category:
-                await cur.execute(
-                    """
-                    SELECT COUNT(*) AS total_events FROM property_events pe
-                    JOIN properties p ON p.id = pe.property_id
-                    WHERE p.category = %s
-                    """,
-                    (category,),
-                )
-            else:
-                await cur.execute("SELECT COUNT(*) AS total_events FROM property_events")
-            events_total_row = await cur.fetchone()
-
-            if category:
-                await cur.execute(
-                    """
-                    SELECT pe.event_type, COUNT(*) AS cnt
-                    FROM property_events pe
-                    JOIN properties p ON p.id = pe.property_id
-                    WHERE p.category = %s
-                    GROUP BY pe.event_type
-                    """,
-                    (category,),
-                )
-            else:
-                await cur.execute(
-                    """
-                    SELECT event_type, COUNT(*) AS cnt
-                    FROM property_events
-                    GROUP BY event_type
-                    """
-                )
-            events_by_type_rows = await cur.fetchall()
-
-            if category:
-                await cur.execute(
-                    """
-                    SELECT pc.classification, COUNT(*) AS cnt
-                    FROM property_classifications pc
-                    JOIN properties p ON p.id = pc.property_id
-                    WHERE p.category = %s
-                    GROUP BY pc.classification
-                    """,
-                    (category,),
-                )
-            else:
-                await cur.execute(
-                    """
-                    SELECT classification, COUNT(*) AS cnt
-                    FROM property_classifications
-                    GROUP BY classification
-                    """
-                )
-            classifications_rows = await cur.fetchall()
-
-            await cur.execute("SELECT COUNT(*) AS cnt FROM whitelist")
-            whitelist_row = await cur.fetchone()
-
-            await cur.execute("SELECT COUNT(*) AS cnt FROM blacklist")
-            blacklist_row = await cur.fetchone()
-
-            await cur.execute("""
-                SELECT MAX(finished_at) as last_scan_at
-                FROM scan_sessions
-                WHERE status = 'done'
-            """)
-            last_scan_row = await cur.fetchone()
-
-    classifications_counts = {"hot": 0, "warm": 0, "cold": 0}
-    for r in classifications_rows:
-        classifications_counts[r["classification"]] = r["cnt"]
-
-    return {
-        "total_properties": total_row["total_properties"] if total_row else 0,
-        "active_properties": active_row["active_properties"] if active_row else 0,
-        "total_sessions": sessions_row["total_sessions"] if sessions_row else 0,
-        "total_snapshots": snaps_row["total_snapshots"] if snaps_row else 0,
-        "price_stats": {
-            "avg": float(price_row["avg_price"]) if price_row and price_row["avg_price"] else None,
-            "min": price_row["min_price"] if price_row else None,
-            "max": price_row["max_price"] if price_row else None,
-        },
-        "avg_days_on_market": (
-            float(dom_row["avg_days_on_market"])
-            if dom_row and dom_row["avg_days_on_market"]
-            else None
-        ),
-        "sessions_by_status": {r["status"]: r["cnt"] for r in session_status_rows},
-        "total_events": events_total_row["total_events"] if events_total_row else 0,
-        "events_by_type": {r["event_type"]: r["cnt"] for r in events_by_type_rows},
-        "classifications": classifications_counts,
-        "whitelisted": whitelist_row["cnt"] if whitelist_row else 0,
-        "blacklisted": blacklist_row["cnt"] if blacklist_row else 0,
-        "last_scan_at": last_scan_row["last_scan_at"].isoformat() if last_scan_row and last_scan_row["last_scan_at"] else None,
     }
 
 

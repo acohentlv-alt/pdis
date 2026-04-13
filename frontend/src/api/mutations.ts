@@ -33,8 +33,6 @@ export function useWhitelist() {
       apiFetch(`/api/whitelist/${yad2Id}`, { method: 'POST', body: JSON.stringify({}) }),
     onSuccess: (_data, yad2Id) => {
       qc.invalidateQueries({ queryKey: ['property', yad2Id] });
-      qc.invalidateQueries({ queryKey: ['opportunities'] });
-      qc.invalidateQueries({ queryKey: ['classifications'] });
       qc.invalidateQueries({ queryKey: ['whitelistIds'] });
       qc.invalidateQueries({ queryKey: ['whitelistProperties'] });
     },
@@ -47,8 +45,6 @@ export function useRemoveWhitelist() {
     mutationFn: (yad2Id: string) => apiFetch(`/api/whitelist/${yad2Id}`, { method: 'DELETE' }),
     onSuccess: (_data, yad2Id) => {
       qc.invalidateQueries({ queryKey: ['property', yad2Id] });
-      qc.invalidateQueries({ queryKey: ['opportunities'] });
-      qc.invalidateQueries({ queryKey: ['classifications'] });
       qc.invalidateQueries({ queryKey: ['whitelistIds'] });
       qc.invalidateQueries({ queryKey: ['whitelistProperties'] });
     },
@@ -62,8 +58,6 @@ export function useBlacklist() {
       apiFetch(`/api/blacklist/${yad2Id}`, { method: 'POST', body: JSON.stringify({}) }),
     onSuccess: (_data, yad2Id) => {
       qc.invalidateQueries({ queryKey: ['property', yad2Id] });
-      qc.invalidateQueries({ queryKey: ['opportunities'] });
-      qc.invalidateQueries({ queryKey: ['classifications'] });
       qc.invalidateQueries({ queryKey: ['blacklistIds'] });
       qc.invalidateQueries({ queryKey: ['blacklistProperties'] });
     },
@@ -76,8 +70,6 @@ export function useRemoveBlacklist() {
     mutationFn: (yad2Id: string) => apiFetch(`/api/blacklist/${yad2Id}`, { method: 'DELETE' }),
     onSuccess: (_data, yad2Id) => {
       qc.invalidateQueries({ queryKey: ['property', yad2Id] });
-      qc.invalidateQueries({ queryKey: ['opportunities'] });
-      qc.invalidateQueries({ queryKey: ['classifications'] });
       qc.invalidateQueries({ queryKey: ['blacklistIds'] });
       qc.invalidateQueries({ queryKey: ['blacklistProperties'] });
     },
@@ -100,9 +92,6 @@ export function useOpenSearch() {
         body: JSON.stringify(params),
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['opportunities'] });
-      queryClient.invalidateQueries({ queryKey: ['classifications'] });
-      queryClient.invalidateQueries({ queryKey: ['stats'] });
       queryClient.invalidateQueries({ queryKey: ['presetStats'] });
     },
   });
@@ -191,7 +180,6 @@ export function useScanPreset() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['presets'] });
       qc.invalidateQueries({ queryKey: ['presetProperties'] });
-      qc.invalidateQueries({ queryKey: ['stats'] });
       qc.invalidateQueries({ queryKey: ['presetStats'] });
     },
   });

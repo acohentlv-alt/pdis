@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useProperty, useSignals, useEvents, useOperatorInput, useMatches } from '../api/queries';
 import { useWhitelist, useRemoveWhitelist, useBlacklist, useRemoveBlacklist, useAddFavorite, useRemoveFavorite } from '../api/mutations';
-import { formatPrice, formatPricePerSqm, formatDate, formatDateFull, CLASSIFICATION_STYLES, SIGNAL_LABELS } from '../lib/format';
+import { formatPrice, formatPricePerSqm, formatDate, formatDateFull, SIGNAL_LABELS } from '../lib/format';
 import LifecycleTimeline from '../components/LifecycleTimeline';
 import ImageViewer from '../components/ImageViewer';
 import OperatorInputForm from '../components/OperatorInputForm';
@@ -74,9 +74,7 @@ export default function PropertyDetailPage() {
   }
 
   const classification = (prop.classification as Record<string, unknown> | null);
-  const cls = (classification?.classification as string) ?? 'cold';
   const sd = (classification?.signal_details as Record<string, unknown>) ?? {};
-  const style = CLASSIFICATION_STYLES[cls] ?? CLASSIFICATION_STYLES.cold;
 
   const price = prop.price as number | null;
   const sqmBuild = prop.square_meter_build as number | null;
@@ -214,19 +212,6 @@ export default function PropertyDetailPage() {
           <div className="flex gap-1 shrink-0">
             <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">
               {source === 'yad2' ? 'Yad2' : source}
-            </span>
-            <span
-              className={`${style.bg} text-white text-xs px-2 py-0.5 rounded-full font-medium cursor-help`}
-              title={
-                strongSignals.length > 0 || weakSignals.length > 0
-                  ? [
-                      ...(strongSignals.length > 0 ? [`Strong: ${strongSignals.map(s => SIGNAL_LABELS[s] ?? s).join(', ')}`] : []),
-                      ...(weakSignals.length > 0 ? [`Weak: ${weakSignals.map(s => SIGNAL_LABELS[s] ?? s).join(', ')}`] : []),
-                    ].join('\n')
-                  : cls === 'cold' ? 'No distress signals detected' : ''
-              }
-            >
-              {style.icon} {style.label}
             </span>
           </div>
         </div>
