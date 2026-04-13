@@ -5,20 +5,33 @@
 
 ## DONE (today)
 
-*(Nothing yet — session just started.)*
+### Phase 1A Amit Fit backend shipped
+Commit `8705f0b` on main. Foundation for per-neighborhood pricing intelligence:
+- New `neighborhood_thresholds` table (preferred + max per-sqm targets per size bucket, unique + check constraints)
+- Signal engine adds `buyer_fit_tags` array to `signal_details` — ORTHOGONAL to distress, does NOT affect hot/warm/cold classification
+- 3 API endpoints: GET/PUT/DELETE `/api/thresholds` with full validation
+- QA 28/28 PASS. Verified end-to-end on real Florentin property.
+
+### QA of Apr 5 changes → deploy caught up
+Preset Manager scroll fix = LIVE. Sort dropdown fix = LIVE (was stale this morning, Render deployed overnight to new bundle `index-ts09WsP6.js`).
 
 ---
 
-## AWAITING TEST (carried from Apr 5 late night)
+## IN PROGRESS
 
-### Verify latest push on production
-Late-night Apr 5 push added two changes — still need verification on production:
-- Preset Manager scrolls to bottom with padding (`pb-16` + `z-[60]` fix)
-- Sort dropdown shows "Market time + Signals" as default
-- Cards sorted by longest on market first (days_on_market DESC, signal count DESC as tiebreaker)
+### Phase 1B Amit Fit admin UI (NEXT)
+Add "Pricing Targets" collapsible in PresetManager.tsx edit form, only when `category='forsale'`. Per neighborhood in preset (comma-sep hood_ids resolved via `useNeighborhoods`): 7 stacked size-bucket rows × 2 inputs (preferred, max ₪/m²). One collapsible per neighborhood, collapsed by default (mobile-friendly). Save calls PUT /api/thresholds. Reviewer recommended batch fetch per preset, not N queries per neighborhood.
+**Decisions Alan made (during planning):**
+- Consolidate badges (don't stack Amit Fit + Below-avg — Amit takes precedence) [applies to Phase 1C]
+- Apply Amit signals to Favorites + SearchResults sort too, not just OpportunityPage
+- hood_id for Florentin is NOT 1471 — must be looked up from DB: `SELECT DISTINCT hood_id, neighborhood FROM properties WHERE neighborhood LIKE '%פלורנטין%'`
 
-### Scheduled scans behavior with new code
-cron-job.org is set up (08:00 + 18:00 Israel time) but scan behavior needs checking against the latest code.
+### Phase 1C Amit Fit display (AFTER 1B)
+- Remove old `dealQualityLabel` / `targetPriceSqm` / `computeTargetPriceSqm` (PropertyCard.tsx:14,32,84-93,124; OpportunityPage.tsx:9,270-272,429,445; presetMatch.ts:32-40)
+- Gold 🎯 PRIME DEAL banner at top of card when buyer_fit_tags non-empty AND strong_signals.length >= 1
+- Green "Amit Fit · −N%" pill when below preferred; yellow "Close · +N%" when between preferred and max
+- Consolidate: hide below_avg pill when Amit Fit pill fires (Amit takes precedence)
+- Update signalCount helper in OpportunityPage, FavoritesPage, SearchResultsPage to include buyer_fit_tags.length
 
 ---
 

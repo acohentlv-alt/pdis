@@ -215,3 +215,18 @@ export function useSaveOperatorInput(yad2Id: string) {
     },
   });
 }
+
+export function useUpsertThresholds() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (thresholds: Array<{
+      neighborhood: string; hood_id?: number | null; category: string;
+      size_min: number; size_max: number;
+      target_price_per_sqm_preferred: number; target_price_per_sqm_max: number;
+    }>) => apiFetch('/api/thresholds', {
+      method: 'PUT',
+      body: JSON.stringify({ thresholds }),
+    }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['thresholds'] }),
+  });
+}

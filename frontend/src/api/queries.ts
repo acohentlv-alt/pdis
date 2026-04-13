@@ -191,3 +191,16 @@ export function useNeighborhoods(cityCode: string | null) {
     enabled: cityCode !== null && cityCode !== '',
   });
 }
+
+export function useThresholds(category: string = 'forsale', enabled: boolean = true) {
+  return useQuery({
+    queryKey: ['thresholds', category],
+    queryFn: () => apiFetch<{ thresholds: Array<{
+      id: number; neighborhood: string; hood_id: number | null;
+      category: string; size_min: number; size_max: number;
+      target_price_per_sqm_preferred: number; target_price_per_sqm_max: number;
+    }> }>(`/api/thresholds?category=${category}`),
+    enabled,
+    refetchOnWindowFocus: false,
+  });
+}

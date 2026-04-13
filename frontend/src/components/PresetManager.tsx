@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useAllPresets, useNeighborhoods } from '../api/queries';
+import { useState, useEffect, useRef } from 'react';
+import { useAllPresets, useNeighborhoods, useThresholds } from '../api/queries';
 import {
   useCreatePreset,
   useUpdatePreset,
@@ -7,6 +7,7 @@ import {
   useTogglePreset,
   useClonePreset,
   useScanPreset,
+  useUpsertThresholds,
 } from '../api/mutations';
 
 interface PresetManagerProps {
@@ -60,6 +61,11 @@ const PROPERTY_TYPE_OPTIONS = [
   { value: 'housing_unit', label: 'Unit' },
   { value: 'other', label: 'Other' },
 ];
+
+const SIZE_BUCKETS: Array<[number, number]> = [
+  [30, 40], [40, 50], [50, 60], [60, 70], [70, 80], [80, 90], [90, 100],
+];
+const bucketKey = (lo: number, hi: number) => `${lo}-${hi}`;
 
 const emptyForm = (): PresetFormData => ({
   name: '',
@@ -220,6 +226,45 @@ export default function PresetManager({ open, onClose, category }: PresetManager
   // Must be before early return — hooks cannot be conditional
   const { data: hoodData } = useNeighborhoods(form.city_code || null);
 
+  const upsertThresholds = useUpsertThresholds();
+
+  type PricingRow = { pref: string; max: string };
+  type PricingState = Record<number, Record<string, PricingRow>>;
+  const [pricingTargets, setPricingTargets] = useState<PricingState>({});
+  const [pricingExpanded, setPricingExpanded] = useState(false);
+  const [neighborhoodExpanded, setNeighborhoodExpanded] = useState<Record<number, boolean>>({});
+
+  const isForSale = form.category === 'forsale';
+  const { data: thresholdsData } = useThresholds('forsale', open && isForSale);
+
+  const seededKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const currentKey = `${editingId ?? 'none'}-${showCreate ? 'create' : 'noedit'}`;
+    if (!thresholdsData?.thresholds || !hoodData?.neighborhoods) return;
+    if (seededKeyRef.current === currentKey) return;
+    seededKeyRef.current = currentKey;
+
+    const hoodNameToId = new Map(hoodData.neighborhoods.map((h: any) => [h.neighborhood, h.hood_id]));
+    const seeded: PricingState = {};
+    for (const t of thresholdsData.thresholds) {
+      const hoodId = t.hood_id ?? hoodNameToId.get(t.neighborhood);
+      if (hoodId == null) continue;
+      if (!seeded[hoodId]) seeded[hoodId] = {};
+      seeded[hoodId][bucketKey(t.size_min, t.size_max)] = {
+        pref: String(t.target_price_per_sqm_preferred),
+        max: String(t.target_price_per_sqm_max),
+      };
+    }
+    setPricingTargets(seeded);
+  }, [thresholdsData, hoodData, editingId, showCreate]);
+
+  useEffect(() => {
+    if (!open) {
+      seededKeyRef.current = null;
+    }
+  }, [open]);
+
   if (!open) return null;
 
   const presets = (data?.presets ?? []) as Record<string, unknown>[];
@@ -245,6 +290,10 @@ export default function PresetManager({ open, onClose, category }: PresetManager
     setEditingId(null);
     setFormError(null);
     setShowAdvanced(false);
+    setPricingTargets({});
+    setNeighborhoodExpanded({});
+    setPricingExpanded(false);
+    seededKeyRef.current = null;
   }
 
   async function handleSubmit() {
@@ -252,12 +301,64 @@ export default function PresetManager({ open, onClose, category }: PresetManager
     if (error) { setFormError(error); return; }
     setFormError(null);
 
-    if (editingId !== null) {
-      await updatePreset.mutateAsync({ id: editingId, ...formToPayload(form) });
-      setEditingId(null);
-    } else {
-      await createPreset.mutateAsync(formToPayload(form));
-      setShowCreate(false);
+    const thresholdsToSave: Array<{
+      neighborhood: string; hood_id: number; category: string;
+      size_min: number; size_max: number;
+      target_price_per_sqm_preferred: number; target_price_per_sqm_max: number;
+    }> = [];
+    if (form.category === 'forsale' && hoodData?.neighborhoods) {
+      const hoodIdToName = new Map(hoodData.neighborhoods.map((h: any) => [h.hood_id, h.neighborhood]));
+      const selectedHoods = form.neighborhood?.split(',').filter(Boolean).map(Number) || [];
+      for (const hoodId of selectedHoods) {
+        const name = hoodIdToName.get(hoodId);
+        if (!name) continue;
+        const buckets = pricingTargets[hoodId] || {};
+        for (const [lo, hi] of SIZE_BUCKETS) {
+          const row = buckets[bucketKey(lo, hi)];
+          if (!row) continue;
+          const prefStr = row.pref.trim();
+          const maxStr = row.max.trim();
+          if (!prefStr && !maxStr) continue;
+          if (!prefStr || !maxStr) {
+            setFormError(`${name} ${lo}-${hi} sqm: please fill both Preferred and Max (or clear both).`);
+            return;
+          }
+          const pref = parseInt(prefStr, 10);
+          const mx = parseInt(maxStr, 10);
+          if (!Number.isInteger(pref) || !Number.isInteger(mx) || pref <= 0 || mx < pref) {
+            setFormError(`${name} ${lo}-${hi} sqm: Max must be at least Preferred, both greater than 0.`);
+            return;
+          }
+          thresholdsToSave.push({
+            neighborhood: name, hood_id: hoodId, category: 'forsale',
+            size_min: lo, size_max: hi,
+            target_price_per_sqm_preferred: pref, target_price_per_sqm_max: mx,
+          });
+        }
+      }
+    }
+
+    try {
+      if (editingId !== null) {
+        await updatePreset.mutateAsync({ id: editingId, ...formToPayload(form) });
+      } else {
+        const created = await createPreset.mutateAsync(formToPayload(form));
+        if (created && typeof (created as any).id === 'number') {
+          setEditingId((created as any).id);
+          setShowCreate(false);
+        }
+      }
+      if (thresholdsToSave.length > 0) {
+        await upsertThresholds.mutateAsync(thresholdsToSave);
+      }
+      if (editingId !== null) setEditingId(null);
+      else setShowCreate(false);
+      setPricingTargets({});
+      setNeighborhoodExpanded({});
+      setPricingExpanded(false);
+      seededKeyRef.current = null;
+    } catch (e: any) {
+      setFormError(`Save failed: ${e?.message || 'unknown error'}`);
     }
   }
 
@@ -533,6 +634,87 @@ export default function PresetManager({ open, onClose, category }: PresetManager
           </div>
         )}
 
+        {form.category === 'forsale' && (
+          <div className="border-t border-gray-200 pt-3">
+            <button
+              type="button"
+              onClick={() => setPricingExpanded((v: boolean) => !v)}
+              className="w-full text-left text-xs text-blue-600 hover:text-blue-800 py-1"
+            >
+              {pricingExpanded ? '▲ Hide Pricing Targets (Amit Fit)' : '▼ Show Pricing Targets (Amit Fit)'}
+            </button>
+
+            {pricingExpanded && (() => {
+              const selectedHoodIds = form.neighborhood?.split(',').filter(Boolean).map(Number).filter((n: number) => !isNaN(n)) || [];
+              if (selectedHoodIds.length === 0) {
+                return <div className="text-xs text-gray-400 py-2 text-center">Select neighborhoods above first.</div>;
+              }
+              const hoodIdToName = new Map((hoodData?.neighborhoods || []).map((h: any) => [h.hood_id, h.neighborhood]));
+
+              return (
+                <div className="space-y-2 mt-2">
+                  <div className="text-[11px] text-gray-500 italic px-1">
+                    Targets are shared across all presets for this neighborhood.
+                  </div>
+                  {selectedHoodIds.map((hoodId: number) => {
+                    const name = hoodIdToName.get(hoodId);
+                    if (!name) return null;
+                    const isOpen = !!neighborhoodExpanded[hoodId];
+                    const hoodBuckets = pricingTargets[hoodId] || {};
+                    const filledCount = SIZE_BUCKETS.filter(([lo, hi]) => {
+                      const r = hoodBuckets[bucketKey(lo, hi)];
+                      return r && r.pref && r.max;
+                    }).length;
+
+                    return (
+                      <div key={hoodId} className="border border-gray-200 rounded-lg">
+                        <button
+                          type="button"
+                          onClick={() => setNeighborhoodExpanded((prev: Record<number, boolean>) => ({ ...prev, [hoodId]: !prev[hoodId] }))}
+                          className="w-full flex items-center justify-between gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                        >
+                          <span className="flex items-center gap-1 min-w-0">
+                            <span className="flex-shrink-0">{isOpen ? '▲' : '▼'}</span>
+                            <span dir="auto" className="truncate">{name}</span>
+                          </span>
+                          <span className="text-xs text-gray-400 flex-shrink-0 whitespace-nowrap">{filledCount}/{SIZE_BUCKETS.length} filled</span>
+                        </button>
+                        {isOpen && (
+                          <div className="px-3 pb-3 space-y-3">
+                            {SIZE_BUCKETS.map(([lo, hi]) => {
+                              const key = bucketKey(lo, hi);
+                              const row = hoodBuckets[key] || { pref: '', max: '' };
+                              const setRow = (patch: Partial<PricingRow>) => {
+                                setPricingTargets((prev: PricingState) => ({
+                                  ...prev,
+                                  [hoodId]: { ...(prev[hoodId] || {}), [key]: { ...row, ...patch } },
+                                }));
+                              };
+                              return (
+                                <div key={key}>
+                                  <label className={labelCls}>{lo}–{hi} sqm (₪ per sqm)</label>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <input type="number" step="100" min="0" className={inputCls}
+                                      placeholder="Preferred" value={row.pref}
+                                      onChange={(e: any) => setRow({ pref: e.target.value })} />
+                                    <input type="number" step="100" min="0" className={inputCls}
+                                      placeholder="Max" value={row.max}
+                                      onChange={(e: any) => setRow({ max: e.target.value })} />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
         {formError && (
           <div className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{formError}</div>
         )}
@@ -540,10 +722,10 @@ export default function PresetManager({ open, onClose, category }: PresetManager
         <div className="flex gap-2">
           <button
             onClick={handleSubmit}
-            disabled={createPreset.isPending || updatePreset.isPending}
+            disabled={createPreset.isPending || updatePreset.isPending || upsertThresholds.isPending}
             className="flex-1 bg-gray-900 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50"
           >
-            {createPreset.isPending || updatePreset.isPending ? 'Saving…' : 'Save'}
+            {createPreset.isPending || updatePreset.isPending || upsertThresholds.isPending ? 'Saving…' : 'Save'}
           </button>
           <button onClick={cancelForm} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm text-gray-700">
             Cancel
@@ -553,12 +735,20 @@ export default function PresetManager({ open, onClose, category }: PresetManager
     );
   }
 
+  function handleOuterClose() {
+    setPricingTargets({});
+    setNeighborhoodExpanded({});
+    setPricingExpanded(false);
+    seededKeyRef.current = null;
+    onClose();
+  }
+
   return (
     <div className="fixed inset-0 z-[60] flex flex-col bg-white">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 shrink-0">
         <h2 className="text-lg font-bold text-gray-900">Manage Presets</h2>
-        <button onClick={onClose} className="p-2 text-gray-500 hover:text-gray-800 text-lg">&#x2715;</button>
+        <button onClick={handleOuterClose} className="p-2 text-gray-500 hover:text-gray-800 text-lg">&#x2715;</button>
       </div>
 
       {/* Body */}
