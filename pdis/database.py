@@ -415,6 +415,44 @@ async def run_migrations() -> None:
                 ALTER TABLE properties ADD COLUMN IF NOT EXISTS year_built INTEGER
             """)
 
+            # Phase 2B-1: Per-neighborhood feature adjustments (year, floor, parking, mamad)
+            await cur.execute("""
+                CREATE TABLE IF NOT EXISTS neighborhood_feature_adjustments (
+                    id                          SERIAL PRIMARY KEY,
+                    neighborhood                TEXT NOT NULL,
+                    hood_id                     INTEGER,
+                    category                    TEXT NOT NULL DEFAULT 'forsale',
+                    year_old_pref_pct           NUMERIC(5,2) NOT NULL DEFAULT -18,
+                    year_old_max_pct            NUMERIC(5,2) NOT NULL DEFAULT -18,
+                    year_mid_old_pref_pct       NUMERIC(5,2) NOT NULL DEFAULT -8,
+                    year_mid_old_max_pct        NUMERIC(5,2) NOT NULL DEFAULT -8,
+                    year_mid_pref_pct           NUMERIC(5,2) NOT NULL DEFAULT 0,
+                    year_mid_max_pct            NUMERIC(5,2) NOT NULL DEFAULT 0,
+                    year_new_pref_pct           NUMERIC(5,2) NOT NULL DEFAULT 5,
+                    year_new_max_pct            NUMERIC(5,2) NOT NULL DEFAULT 5,
+                    walkup_pct_per_floor        NUMERIC(4,2) NOT NULL DEFAULT 3,
+                    parking_bonus_pref          INTEGER NOT NULL DEFAULT 0,
+                    parking_bonus_max           INTEGER NOT NULL DEFAULT 0,
+                    mamad_pct_pref              NUMERIC(5,2) NOT NULL DEFAULT 0,
+                    mamad_pct_max               NUMERIC(5,2) NOT NULL DEFAULT 0,
+                    created_at                  TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at                  TIMESTAMPTZ DEFAULT NOW(),
+                    CONSTRAINT nfa_unique UNIQUE (neighborhood, category),
+                    CONSTRAINT nfa_valid_category CHECK (category IN ('forsale', 'rent')),
+                    CONSTRAINT nfa_walkup_range CHECK (walkup_pct_per_floor >= 0 AND walkup_pct_per_floor <= 10),
+                    CONSTRAINT nfa_year_old_order CHECK (year_old_max_pct >= year_old_pref_pct),
+                    CONSTRAINT nfa_year_mid_old_order CHECK (year_mid_old_max_pct >= year_mid_old_pref_pct),
+                    CONSTRAINT nfa_year_mid_order CHECK (year_mid_max_pct >= year_mid_pref_pct),
+                    CONSTRAINT nfa_year_new_order CHECK (year_new_max_pct >= year_new_pref_pct),
+                    CONSTRAINT nfa_parking_order CHECK (parking_bonus_max >= parking_bonus_pref),
+                    CONSTRAINT nfa_mamad_order CHECK (mamad_pct_max >= mamad_pct_pref)
+                )
+            """)
+            await cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_nfa_lookup
+                  ON neighborhood_feature_adjustments(neighborhood, hood_id, category)
+            """)
+
             # Add FB columns to properties
             for col_def in ["author_name TEXT", "group_url TEXT", "like_count INTEGER"]:
                 await cur.execute(f"ALTER TABLE properties ADD COLUMN IF NOT EXISTS {col_def}")

@@ -30,6 +30,24 @@ _YEAR_ADJUSTMENT = {
     "new":      0.05,   # >= 2010
 }
 
+_DEFAULT_FA = {
+    "year_old_pref_pct":     -18.0,
+    "year_old_max_pct":      -18.0,
+    "year_mid_old_pref_pct":  -8.0,
+    "year_mid_old_max_pct":   -8.0,
+    "year_mid_pref_pct":       0.0,
+    "year_mid_max_pct":        0.0,
+    "year_new_pref_pct":       5.0,
+    "year_new_max_pct":        5.0,
+    "walkup_pct_per_floor":    3.0,
+    "parking_bonus_pref":      0,
+    "parking_bonus_max":       0,
+    "mamad_pct_pref":          0.0,
+    "mamad_pct_max":           0.0,
+}
+
+_MAX_NEGATIVE_ADJUSTMENT = -0.50
+
 
 def _floor_adjustment(floor: int | None, has_elevator: bool | None) -> float:
     """Floor 1 = 0% (barely a walk-up). Floor 2 = -3%. Cap at -15%.
@@ -127,6 +145,27 @@ async def compute_signals_batch(property_ids: list[int]) -> dict[int, dict]:
             await cur.execute("SELECT * FROM neighborhood_thresholds")
             threshold_rows = await cur.fetchall()
 
+            # BATCH QUERY 5: Per-neighborhood feature adjustments (Phase 2B-1)
+            await cur.execute(
+                """SELECT neighborhood, hood_id, category,
+                          year_old_pref_pct, year_old_max_pct,
+                          year_mid_old_pref_pct, year_mid_old_max_pct,
+                          year_mid_pref_pct, year_mid_max_pct,
+                          year_new_pref_pct, year_new_max_pct,
+                          walkup_pct_per_floor,
+                          parking_bonus_pref, parking_bonus_max,
+                          mamad_pct_pref, mamad_pct_max
+                   FROM neighborhood_feature_adjustments"""
+            )
+            fa_rows = await cur.fetchall()
+            fa_by_hood_id: dict[tuple, dict] = {}
+            fa_by_name: dict[tuple, dict] = {}
+            for r in fa_rows:
+                if r.get("hood_id"):
+                    fa_by_hood_id[(r["hood_id"], r["category"])] = dict(r)
+                if r.get("neighborhood"):
+                    fa_by_name[(r["neighborhood"], r["category"])] = dict(r)
+
     # Build threshold lookup dicts
     by_hood_id: dict[tuple, list[dict]] = {}
     by_name: dict[tuple, list[dict]] = {}
@@ -152,7 +191,7 @@ async def compute_signals_batch(property_ids: list[int]) -> dict[int, dict]:
     for pid in property_ids:
         events = events_by_prop.get(pid, [])
         prop = props.get(pid, {})
-        results[pid] = _compute_single(pid, events, prop, hood_avgs, by_hood_id, by_name)
+        results[pid] = _compute_single(pid, events, prop, hood_avgs, by_hood_id, by_name, fa_by_hood_id, fa_by_name)
 
     return results
 
@@ -186,6 +225,8 @@ def _compute_single(
     hood_avgs: dict,
     by_hood_id: dict | None = None,
     by_name: dict | None = None,
+    fa_by_hood_id: dict | None = None,
+    fa_by_name: dict | None = None,
 ) -> dict:
     """Compute tier-based signals for a single property. Pure function, no DB calls."""
     strong_signals = []
@@ -295,7 +336,6 @@ def _compute_single(
     prop_neighborhood = prop.get("neighborhood")
 
     if price > 0 and sqm > 0 and prop_category and (by_hood_id is not None or by_name is not None):
-        price_per_sqm = price / sqm
         candidates = []
         if prop_hood_id and by_hood_id is not None:
             candidates.extend(by_hood_id.get((prop_hood_id, prop_category), []))
@@ -313,45 +353,95 @@ def _compute_single(
             (r for r in unique_candidates if r["size_min"] <= sqm < r["size_max"]),
             None,
         )
-        if bucket:
-            pref = float(bucket["target_price_per_sqm_preferred"])
-            mx = float(bucket["target_price_per_sqm_max"])
 
+        if bucket and sqm > 0 and price > 0:
+            pref_per_sqm_base = float(bucket["target_price_per_sqm_preferred"])
+            max_per_sqm_base = float(bucket["target_price_per_sqm_max"])
+
+            pref_total_base = pref_per_sqm_base * sqm
+            max_total_base = max_per_sqm_base * sqm
+
+            # Find feature adjustments for this property; fall back to defaults
+            fa = None
+            hood_id = prop.get("hood_id")
+            category = prop_category
+            if hood_id and category:
+                fa = (fa_by_hood_id or {}).get((hood_id, category))
+            if not fa and prop_neighborhood and category:
+                fa = (fa_by_name or {}).get((prop_neighborhood, category))
+            fa_source = "neighborhood" if fa else "default"
+            fa_values = fa if fa else _DEFAULT_FA
+
+            # Year band + adjustment
             year = prop.get("year_built")
             band = _year_band(year)
-            year_adj = _YEAR_ADJUSTMENT[band]
-            floor_adj = _floor_adjustment(prop.get("floor"), prop.get("elevator"))
-            total_adj = year_adj + floor_adj
+            year_pref_pct = float(fa_values[f"year_{band}_pref_pct"])
+            year_max_pct = float(fa_values[f"year_{band}_max_pct"])
 
-            pref_adj = pref * (1 + total_adj)
-            mx_adj = mx * (1 + total_adj)
+            # Floor / elevator adjustment — walkup_pct_per_floor stored positive, code negates
+            walkup_pct_positive = float(fa_values["walkup_pct_per_floor"])
+            floor = prop.get("floor")
+            elevator = prop.get("elevator")
+            floor_adj = 0.0
+            if floor is not None and floor > 1 and not elevator:
+                raw = -walkup_pct_positive / 100.0 * (floor - 1)
+                floor_adj = max(raw, -0.15)  # cap at -15%
 
-            pref_total = pref_adj * sqm
-            mx_total = mx_adj * sqm
+            # Mamad adjustment
+            has_mamad = bool(prop.get("safe_room"))
+            mamad_pref_pct = float(fa_values["mamad_pct_pref"]) / 100.0 if has_mamad else 0.0
+            mamad_max_pct = float(fa_values["mamad_pct_max"]) / 100.0 if has_mamad else 0.0
+
+            # Combined % adjustment per tier
+            total_pref_pct = year_pref_pct / 100.0 + floor_adj + mamad_pref_pct
+            total_max_pct = year_max_pct / 100.0 + floor_adj + mamad_max_pct
+            total_pref_pct = max(total_pref_pct, _MAX_NEGATIVE_ADJUSTMENT)
+            total_max_pct = max(total_max_pct, _MAX_NEGATIVE_ADJUSTMENT)
+
+            # Parking: flat ₪ OUTSIDE the % multiplier
+            has_parking = bool(prop.get("parking"))
+            parking_pref = int(fa_values["parking_bonus_pref"]) if has_parking else 0
+            parking_max = int(fa_values["parking_bonus_max"]) if has_parking else 0
+
+            pref_total_adj = pref_total_base * (1 + total_pref_pct) + parking_pref
+            max_total_adj = max_total_base * (1 + total_max_pct) + parking_max
 
             details["amit_breakdown"] = {
-                "v": 1,
+                "v": 2,
+                "fa_source": fa_source,
                 "year_built": year,
                 "year_band": band,
-                "year_adjustment": year_adj,
-                "floor": prop.get("floor"),
-                "elevator": bool(prop.get("elevator")) if prop.get("elevator") is not None else None,
-                "floor_adjustment": floor_adj,
-                "total_adjustment": total_adj,
-                "pref_per_sqm_baseline": pref,
-                "pref_per_sqm_adjusted": pref_adj,
-                "max_per_sqm_baseline": mx,
-                "max_per_sqm_adjusted": mx_adj,
+                "year_pref_pct": year_pref_pct,
+                "year_max_pct": year_max_pct,
+                "floor": floor,
+                "elevator": bool(elevator) if elevator is not None else None,
+                "floor_adjustment_applied": floor_adj,
+                "parking_applied": has_parking,
+                "parking_bonus_pref_applied": parking_pref,
+                "parking_bonus_max_applied": parking_max,
+                "mamad_applied": has_mamad,
+                "mamad_pct_pref_applied": mamad_pref_pct,
+                "mamad_pct_max_applied": mamad_max_pct,
+                "total_pref_pct_applied": total_pref_pct,
+                "total_max_pct_applied": total_max_pct,
+                "pref_per_sqm_baseline": pref_per_sqm_base,
+                "max_per_sqm_baseline": max_per_sqm_base,
+                "pref_total_baseline": pref_total_base,
+                "max_total_baseline": max_total_base,
+                "pref_total_adjusted": pref_total_adj,
+                "max_total_adjusted": max_total_adj,
+                "sqm": sqm,
+                "price": price,
             }
-            details["amit_target_total_pref"] = pref_total
-            details["amit_target_total_max"] = mx_total
+            details["amit_target_total_pref"] = pref_total_adj
+            details["amit_target_total_max"] = max_total_adj
 
-            if price_per_sqm <= pref_adj:
+            if price <= pref_total_adj:
                 buyer_fit_tags.append("below_amit_target")
-                details["amit_pct_vs_preferred"] = round(((price_per_sqm - pref_adj) / pref_adj) * 100, 1)
-            elif price_per_sqm <= mx_adj:
+                details["amit_pct_vs_preferred"] = round((price - pref_total_adj) / pref_total_adj * 100, 1)
+            elif price <= max_total_adj:
                 buyer_fit_tags.append("close_to_amit_target")
-                details["amit_pct_vs_preferred"] = round(((price_per_sqm - pref_adj) / pref_adj) * 100, 1)
+                details["amit_pct_vs_preferred"] = round((price - pref_total_adj) / pref_total_adj * 100, 1)
 
     return {
         "distress_score": 0.0,  # kept for DB compat, no longer used

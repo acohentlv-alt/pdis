@@ -1947,6 +1947,111 @@ async def delete_threshold(threshold_id: int):
 
 
 # ---------------------------------------------------------------------------
+# Neighborhood feature adjustments (Phase 2B-1)
+# ---------------------------------------------------------------------------
+
+_FA_PAIRED = [
+    ("year_old_pref_pct", "year_old_max_pct"),
+    ("year_mid_old_pref_pct", "year_mid_old_max_pct"),
+    ("year_mid_pref_pct", "year_mid_max_pct"),
+    ("year_new_pref_pct", "year_new_max_pct"),
+    ("parking_bonus_pref", "parking_bonus_max"),
+    ("mamad_pct_pref", "mamad_pct_max"),
+]
+_FA_ALL_COLS = [
+    "year_old_pref_pct", "year_old_max_pct",
+    "year_mid_old_pref_pct", "year_mid_old_max_pct",
+    "year_mid_pref_pct", "year_mid_max_pct",
+    "year_new_pref_pct", "year_new_max_pct",
+    "walkup_pct_per_floor",
+    "parking_bonus_pref", "parking_bonus_max",
+    "mamad_pct_pref", "mamad_pct_max",
+]
+
+
+@router.get("/api/feature-adjustments")
+async def list_feature_adjustments(neighborhood: str | None = None, category: str = "forsale"):
+    async with _db.pool.connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            if neighborhood:
+                await cur.execute(
+                    """SELECT * FROM neighborhood_feature_adjustments
+                       WHERE neighborhood = %s AND category = %s""",
+                    (neighborhood, category),
+                )
+            else:
+                await cur.execute(
+                    """SELECT * FROM neighborhood_feature_adjustments
+                       WHERE category = %s ORDER BY neighborhood""",
+                    (category,),
+                )
+            rows = await cur.fetchall()
+    return {"adjustments": rows}
+
+
+@router.put("/api/feature-adjustments")
+async def upsert_feature_adjustments(request: Request):
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(400, "body must be a JSON object")
+    rows_in = body.get("adjustments", [])
+    if not isinstance(rows_in, list) or not rows_in:
+        raise HTTPException(400, "adjustments must be a non-empty array")
+
+    for t in rows_in:
+        neighborhood = (t.get("neighborhood") or "").strip()
+        if not neighborhood:
+            raise HTTPException(400, "neighborhood is required")
+        category = t.get("category", "forsale")
+        if category not in ("forsale", "rent"):
+            raise HTTPException(400, f"invalid category: {category}")
+        walkup = t.get("walkup_pct_per_floor")
+        if walkup is None or not isinstance(walkup, (int, float)) or walkup < 0 or walkup > 10:
+            raise HTTPException(400, f"walkup_pct_per_floor must be 0-10, got {walkup}")
+        for k in _FA_ALL_COLS:
+            v = t.get(k)
+            if v is None or not isinstance(v, (int, float)):
+                raise HTTPException(400, f"{k} required and must be numeric")
+        for pref_k, max_k in _FA_PAIRED:
+            if t[max_k] < t[pref_k]:
+                raise HTTPException(400, f"{max_k} ({t[max_k]}) must be >= {pref_k} ({t[pref_k]})")
+
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            for t in rows_in:
+                await cur.execute(
+                    f"""INSERT INTO neighborhood_feature_adjustments
+                         (neighborhood, hood_id, category, {', '.join(_FA_ALL_COLS)}, updated_at)
+                       VALUES (%s, %s, %s, {', '.join(['%s'] * len(_FA_ALL_COLS))}, NOW())
+                       ON CONFLICT (neighborhood, category)
+                       DO UPDATE SET
+                         hood_id = EXCLUDED.hood_id,
+                         {', '.join(f'{c} = EXCLUDED.{c}' for c in _FA_ALL_COLS)},
+                         updated_at = NOW()""",
+                    (
+                        t["neighborhood"].strip(),
+                        t.get("hood_id"),
+                        t.get("category", "forsale"),
+                        *[t[c] for c in _FA_ALL_COLS],
+                    ),
+                )
+        await conn.commit()
+    return {"ok": True, "count": len(rows_in)}
+
+
+@router.delete("/api/feature-adjustments/{fa_id}")
+async def delete_feature_adjustment(fa_id: int):
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM neighborhood_feature_adjustments WHERE id = %s", (fa_id,))
+            deleted = cur.rowcount
+        await conn.commit()
+    if deleted == 0:
+        raise HTTPException(404, "feature adjustment not found")
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
 # Facebook ingestion
 # IMPORTANT: /api/ingest/facebook/health and /api/ingest/facebook/log-reveal
 # must be registered BEFORE any path-param routes to avoid capture issues.
