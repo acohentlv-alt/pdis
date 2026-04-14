@@ -19,16 +19,37 @@ Hard-refresh browser then edit FB preset → verify 49 checkboxes appear, tick r
 
 ## READY TO RUN (Alan's hands, ~30-45 min)
 
-### FB VM scraper deployment
-Catalog is seeded (49 groups in Neon), UI works, but no posts are being ingested because the VM scraper hasn't been deployed. Steps:
-1. `scp ~/pdis/vm-scraper/fb_state.json ubuntu@129.159.158.214:/opt/pdis-fb-scraper/state.json`
-2. SSH to VM, install playwright on venv (`pip install playwright && playwright install chromium`)
-3. Transfer `run.py` + requirements, install deps
-4. Manual test run — confirm POST /api/ingest/facebook 200
-5. Install crontab entry at 08:00 + 18:00 Israel time
-6. Flip `FB_INGESTION_ENABLED=true` on Render
+### FB VM scraper deployment — A2 brief drafted, awaiting /review and /exec
+Investigation Apr 15 (late session) confirmed three stacked off-switches: feature flag default-False, empty fb_groups linkage on the active preset, scraper never ran. Planner produced a full A2 brief (in conversation transcript, planner agent `ab7b1cef88493c91a`).
 
-Full 8-step checklist from prior day is in archived `TASKS_2026-04-14.md` under "AWAITING DEPLOY".
+Brief summary:
+- **New:** `pdis/utils/city.py` with `normalize_city()` supporting 6 TLV variants (Hebrew with/without hyphen, English variants → canonical `"תל אביב יפו"`)
+- **Remove:** `TLV_CITY_STRING` + `GROUP_CITY_MAP` from `routes.py:2057-2065`; delete `scripts/enumerate_fb_groups.py`; re-point `seed_fb_groups.py` at `vm-scraper/groups.json`
+- **Harden:** `vm-scraper/run.py` — new `--dry-run` flag, selector-drift detection, hard-fail when `PROXY_URL` missing (no warn-and-proceed)
+- **Schedule:** systemd timer (Alan picked over cron) with `OnCalendar=*-*-* 08:00:00`, `RandomizedDelaySec=300`, `Restart=on-failure RestartSec=600 StartLimitBurst=2`
+- **Probation:** `FB_SCANS_PER_DAY=1` for 14 days, then flip to 2
+
+Open decisions before `/exec`:
+1. **Proxy vendor** — Smartproxy ~$5–15/mo recommended (lowest-cost legit residential). Alan said "gold standard for free" — flagged as not possible; alternatives are Bright Data (~$15–45/mo) or no proxy (high FB ban risk on Oracle VM IP).
+2. **Retroactive city normalization** of 1,952 existing `properties.address_city` rows. Alan said "every point of data needs to be accurate" → likely yes; planner didn't include the migration in the printed brief, needs to be added before `/exec`.
+
+Prereqs Alan owns: buy proxy → prep FB account (member of 5 TLV groups + 2FA on) → verify VM SSH → set Render env (`FB_INGESTION_ENABLED=false`, `FB_SCANS_PER_DAY=1`).
+
+Then: `/review` → `/exec` → manual dry-run on VM → install systemd timer → flip flag.
+
+---
+
+## FB UX POLISH (post-A2 follow-ups)
+
+### FilterBar — Facebook source option missing
+`frontend/src/components/FilterBar.tsx:124-126` only offers "All sources / Yad2 / Madlan". Once FB ingestion is live, add `<option value="facebook">Facebook</option>`. "All sources" already includes FB rows, so this is dropdown-only UX.
+
+### Apply `normalize_city()` across Yad2/Madlan ingest + filters
+After A2 ships and the canonical is proven stable, extend the normalizer to:
+- `pdis/scraper.py:182` — Yad2 `item.get("city")` on ingest
+- `pdis/scraper_madlan.py:250` — Madlan `addr.get("city")`
+- Any route that filters `properties.address_city` by string equality
+Goal: one canonical value per city across all sources.
 
 ### Govmap full backfill completion + monthly cron
 Still running in tmux session `govmap` on VM. Check status:
