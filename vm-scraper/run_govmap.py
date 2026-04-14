@@ -61,7 +61,7 @@ PDIS_API_URL = os.environ.get("PDIS_API_URL", "https://pdis-lsah.onrender.com").
 # Govmap constants
 # ---------------------------------------------------------------------------
 
-GOVMAP_BASE = "https://api.govmap.gov.il/govmap/api"
+GOVMAP_BASE = "https://www.govmap.gov.il/api/real-estate"
 
 # TLV grid in EPSG:2039 (Israel Transverse Mercator)
 # x: easting range for Tel Aviv
