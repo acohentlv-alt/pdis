@@ -408,10 +408,17 @@ def main():
                     raw_deals = get_deals_for_polygon(polygon_id, session)
                     time.sleep(REQ_DELAY)
 
+                    # Fallback centroid = grid query point (the polygon is within 200m of it)
+                    fallback_lng, fallback_lat = itm_to_wgs(float(x), float(y))
+
                     for raw in raw_deals:
                         parsed = parse_deal(raw, polygon_id)
                         if not parsed:
                             continue
+                        # Attach fallback centroid when street-deals response lacks per-polygon coords
+                        if parsed.get("centroid_lat") is None or parsed.get("centroid_lng") is None:
+                            parsed["centroid_lat"] = fallback_lat
+                            parsed["centroid_lng"] = fallback_lng
                         # Monthly filter
                         if monthly_cutoff and parsed["deal_date"] < monthly_cutoff:
                             continue
