@@ -1,67 +1,63 @@
 # PDIS — Task List
-*April 14, 2026*
+*April 15, 2026*
 
 ---
 
-## READY TO RUN (next session, on VM)
+## AWAITING QA / VERIFICATION (deployed tonight, needs Alan's eyes in the browser)
 
-### Govmap full TLV backfill (~14-42h weekend run)
-Pipeline is fully verified end-to-end (commit `2078efd`). Test run inserted 2 Lev-Ha'ir deals, POST 200.
+### Scan button UX + progress bar
+Shipped but needs manual test in deployed environment after Render auto-deploy:
+- Click Run Now → button reads `Scanning X%` with live emerald bar
+- Other presets disable with "Scan running"
+- Last-scan line per preset (`Xm ago · N listings` / `Never scanned` / red `failed` / amber `blocked`)
+- Error banner surfaces readable messages
 
-On the Oracle VM, in a tmux session:
-```
-sudo apt install -y tmux && tmux new -s govmap
-cd ~/pdis && git pull
-cd vm-scraper && set -a && source .env && set +a && python3 run_govmap.py 2>&1 | tee /tmp/govmap_full.log
-```
-Detach: `Ctrl+B` then `D`. Reattach later: `tmux attach -t govmap`.
-
-After completion:
-- Verify row count: `SELECT COUNT(*) FROM closed_transactions` (expect 500k–1M for full TLV)
-- Spot-check coords landed in Tel Aviv (not Antarctica): `SELECT centroid_lat, centroid_lng FROM closed_transactions LIMIT 10` — lat should be ~32.0, lng ~34.7
-- Open a Florentin property in the UI — Closed Comps panel should render with real data
-
-### Add monthly cron on VM (after backfill succeeds)
-```
-crontab -e
-# add:
-CRON_TZ=Asia/Jerusalem
-0 3 1 * * cd /home/ubuntu/pdis/vm-scraper && set -a; source .env; set +a; /home/ubuntu/pdis/venv/bin/python3 run_govmap.py --monthly >> /tmp/govmap_cron.log 2>&1
-```
-Runs first of each month at 3am Israel time.
+### FB groups multi-select UI
+Hard-refresh browser then edit FB preset → verify 49 checkboxes appear, tick relevant ones, save, reopen → persistence check.
 
 ---
 
-## AWAITING DEPLOY (code shipped, Alan's manual steps remain)
+## READY TO RUN (Alan's hands, ~30-45 min)
 
-### FB scraper — original brief #1 still not deployed
-Code has been on main since commit `c53e651` (days ago). Deployment checklist:
-1. Verify Render deploy finished: `curl https://pdis-lsah.onrender.com/api/ingest/facebook/health`
-2. Verify `TLV_CITY_STRING` = `"תל אביב-יפו"` on Neon
-3. `INGEST_SECRET` is already set on Render (done today). FB uses same secret.
-4. Add Render env: `FB_INGESTION_ENABLED=false`, `FB_SCANS_PER_DAY=1`
-5. On laptop: `python3 export_fb_cookies.py` → log in with personal FB → `fb_state.json`
-6. SCP scraper + cookies to VM, install deps, manual test run
-7. Crontab on VM at 08:00 + 18:00 Israel time
-8. Flip `FB_INGESTION_ENABLED=true`
+### FB VM scraper deployment
+Catalog is seeded (49 groups in Neon), UI works, but no posts are being ingested because the VM scraper hasn't been deployed. Steps:
+1. `scp ~/pdis/vm-scraper/fb_state.json ubuntu@129.159.158.214:/opt/pdis-fb-scraper/state.json`
+2. SSH to VM, install playwright on venv (`pip install playwright && playwright install chromium`)
+3. Transfer `run.py` + requirements, install deps
+4. Manual test run — confirm POST /api/ingest/facebook 200
+5. Install crontab entry at 08:00 + 18:00 Israel time
+6. Flip `FB_INGESTION_ENABLED=true` on Render
 
-### Yad2 forsale VM deployment (commit 21941f2)
-Similar pattern to govmap. Script is at `vm-scraper/run_yad2.py` already on the VM.
-1. Add Render env: `YAD2_VM_INGESTION_ENABLED=true` (currently false)
-2. On VM, add crontab entry for `vm-scraper/run_yad2.sh` at 08:30 + 18:30 (30 min stagger after rent scans)
+Full 8-step checklist from prior day is in archived `TASKS_2026-04-14.md` under "AWAITING DEPLOY".
+
+### Govmap full backfill completion + monthly cron
+Still running in tmux session `govmap` on VM. Check status:
+```
+ssh -i ~/.ssh/oracle_vm ubuntu@129.159.158.214 "tail -5 /tmp/govmap_full.log"
+```
+When complete, verify:
+```sql
+SELECT COUNT(*) FROM closed_transactions;  -- expect 500k-1M
+```
+Then install monthly cron (exact block in `TASKS_2026-04-14.md`).
 
 ---
 
 ## NOT STARTED
 
-### Phone numbers — critical per Alan, not yet wired
+### ₪/m² math fix on PropertyCard
+First card shows `4,299,999 ₪ · 82m² (95 total) · 52,439 ₪/m²`. The ₪/m² uses the smaller (build) area. Israeli real estate convention = gross/total. One-line fix in `frontend/src/components/PropertyCard.tsx`: prefer total area, or show both. Quick win.
+
+### Govmap comps rework — Option 2 (Amit-approved)
+Planned but not coded. Remove `below_closed_comps` / `above_closed_comps_20pct` averages-based signals. Replace with raw list of last 3-5 closed sales in same building on PropertyDetailPage. Amit explicitly said he doesn't want neighborhood averages — just real comparable deals. See Apr 14 conversation for full scoping.
+
+### Phone numbers — still broken
 - Madlan: scraper reads `poc.displayNumber` but 0/713 properties get one. Broken or API changed.
 - Yad2: requires separate click-to-reveal API call (not wired).
-- FB: works in theory but depends on FB scraper deployment above.
-Needs its own `/plan` session.
+- FB: works once FB ingest is flowing (depends on deployment above).
 
 ### FB Groups Brief #2 (re-plan after 1 week of real FB data)
-FB-aware dedup, new FB-specific signals (no-broker badge, multi-group cross-post = high distress), Nominatim geocoding pass.
+FB-aware dedup, new FB-specific signals (no-broker badge, multi-group cross-post = high distress), Nominatim geocoding pass for neighborhoods.
 
 ### FB Groups Brief #3
 Source filter dropdown, "Hide brokers" toggle, "Report this listing" link.
@@ -70,11 +66,11 @@ Source filter dropdown, "Hide brokers" toggle, "Report this listing" link.
 Send alerts when notable properties found after a scan completes.
 
 ### F6 — Neighborhood pulse (24-month ₪/m² sparkline)
-Depends on full-city govmap backfill + Amit providing thresholds for more hoods.
+Depends on full-city govmap backfill (in progress) + Amit providing thresholds for more neighborhoods.
 
 ---
 
 ## PARKED
 
 ### FB Marketplace integration
-Reviewed and parked. Needs Playwright + perceptual image hashing.
+Different from FB Groups (which we shipped). Needs Playwright + perceptual image hashing. Revisit after FB Groups pipeline is proven.

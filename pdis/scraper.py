@@ -9,6 +9,7 @@ import asyncio
 import random
 import re
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import structlog
@@ -294,11 +295,15 @@ def _is_blocked(response: cf_requests.Response) -> bool:
     return False
 
 
-async def scrape_preset(preset: dict) -> ScrapeResult:
+async def scrape_preset(
+    preset: dict,
+    progress_cb: Callable[[int], Awaitable[None]] | None = None,
+) -> ScrapeResult:
     """
     Scrape all pages for a given search preset.
 
     preset is a dict with keys matching the search_presets table columns.
+    progress_cb: optional async callback called with 0-85% as pages complete.
     """
     start_time = time.monotonic()
     listings: list[ScrapedListing] = []
@@ -382,6 +387,10 @@ async def scrape_preset(preset: dict) -> ScrapeResult:
                 page_count=len(page_listings),
                 total_so_far=len(listings),
             )
+
+            if progress_cb is not None:
+                pct = int(min(85, (page / max(last_page, 1)) * 85))
+                await progress_cb(pct)
 
             page += 1
 

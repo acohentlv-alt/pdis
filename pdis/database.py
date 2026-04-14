@@ -520,6 +520,11 @@ async def run_migrations() -> None:
             """)
             await cur.execute("INSERT INTO ingest_state (source) VALUES ('facebook') ON CONFLICT (source) DO NOTHING")
 
+            # Add progress column to scan_sessions for live progress bar
+            await cur.execute(
+                "ALTER TABLE scan_sessions ADD COLUMN IF NOT EXISTS progress INTEGER DEFAULT 0"
+            )
+
             # Cleanup migrations — idempotent, removes stale columns/indexes
             await cur.execute("DROP INDEX IF EXISTS idx_classifications_score")
             await cur.execute("ALTER TABLE property_classifications DROP COLUMN IF EXISTS distress_score")

@@ -3,6 +3,7 @@ PDIS API routes.
 """
 
 import json
+import re
 from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
@@ -20,6 +21,18 @@ from pdis.signals import compute_signals_batch
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
+
+_URL_RE = re.compile(r"https?://\S+")
+
+
+def _scrub_error_message(msg: str | None) -> str | None:
+    """Truncate to 200 chars and replace URLs with [url]."""
+    if not msg:
+        return msg
+    scrubbed = _URL_RE.sub("[url]", msg)
+    if len(scrubbed) > 200:
+        scrubbed = scrubbed[:197] + "..."
+    return scrubbed
 
 FB_OPT_IN_SOURCES = {"yad2_facebook", "madlan_facebook", "all", "facebook"}
 MADLAN_SOURCES = {"madlan", "yad2_madlan", "madlan_facebook", "all", "both"}
@@ -269,6 +282,34 @@ async def get_preset_stats(preset_id: int):
             )
             rows = await cur.fetchall()
     return {"preset_id": preset_id, "stats": [dict(r) for r in rows]}
+
+
+# IMPORTANT: /api/presets/{preset_id}/last-session must be after /api/presets/stats/latest
+@router.get("/api/presets/{preset_id}/last-session")
+async def get_preset_last_session(preset_id: int):
+    """Return the latest scan_sessions row for a preset (for live progress bar)."""
+    async with _db.pool.connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT id AS session_id, started_at, finished_at, status,
+                       listings_found, new_listings, error_message, progress
+                FROM scan_sessions
+                WHERE preset_id = %s
+                ORDER BY started_at DESC LIMIT 1
+                """,
+                (preset_id,),
+            )
+            row = await cur.fetchone()
+    if not row:
+        return {"session": None}
+    row = dict(row)
+    row["error_message"] = _scrub_error_message(row.get("error_message"))
+    if row.get("started_at"):
+        row["started_at"] = row["started_at"].isoformat()
+    if row.get("finished_at"):
+        row["finished_at"] = row["finished_at"].isoformat()
+    return {"session": row}
 
 
 @router.get("/api/fb-groups")
@@ -715,6 +756,7 @@ async def _run_scan_background(preset_id: int) -> None:
     finally:
         _scanner._scan_running = False
         _scanner._scan_started_at = None
+        _scanner._scan_progress = None  # safety net — normally reset by _finish_session
 
 
 @router.post("/api/scan/{preset_id}")

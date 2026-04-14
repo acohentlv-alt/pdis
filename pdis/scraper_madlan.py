@@ -2,6 +2,7 @@
 import asyncio
 import random
 import time
+from collections.abc import Awaitable, Callable
 
 import structlog
 from curl_cffi import requests as cf_requests
@@ -337,11 +338,15 @@ def _is_blocked(response: cf_requests.Response) -> bool:
     return False
 
 
-async def scrape_madlan_preset(preset: dict) -> ScrapeResult:
+async def scrape_madlan_preset(
+    preset: dict,
+    progress_cb: Callable[[int], Awaitable[None]] | None = None,
+) -> ScrapeResult:
     """
     Scrape all pages for a Madlan preset via GraphQL API.
 
     preset is a dict with keys matching the search_presets table columns.
+    progress_cb: optional async callback called with 5-85% as pages complete.
     """
     start_time = time.monotonic()
     listings: list[ScrapedListing] = []
@@ -367,6 +372,9 @@ async def scrape_madlan_preset(preset: dict) -> ScrapeResult:
     max_pages = settings.scrape_max_pages
 
     session = _init_session()
+
+    if progress_cb is not None:
+        await progress_cb(5)
 
     try:
         offset = 0
@@ -457,6 +465,10 @@ async def scrape_madlan_preset(preset: dict) -> ScrapeResult:
 
             listings.extend(page_listings)
             pages_scraped += 1
+
+            if progress_cb is not None:
+                pct = 5 + int(min(80, (pages_scraped / max(max_pages, 1)) * 80))
+                await progress_cb(pct)
 
             log.info(
                 "madlan.page_done",

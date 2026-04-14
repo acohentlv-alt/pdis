@@ -186,8 +186,28 @@ export function usePropertySearch(query: string, category?: string) {
 export function useScanStatus() {
   return useQuery({
     queryKey: ['scanStatus'],
-    queryFn: () => apiFetch<{ running: boolean }>('/api/scan/status'),
-    refetchInterval: 10000,
+    queryFn: () => apiFetch<{ running: boolean; progress: number | null }>('/api/scan/status'),
+    refetchInterval: (query) => query.state.data?.running ? 1500 : 10000,
+  });
+}
+
+export function usePresetLastSession(presetId: number | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ['presetLastSession', presetId],
+    queryFn: () => apiFetch<{
+      session: null | {
+        session_id: number;
+        started_at: string;
+        finished_at: string | null;
+        status: 'running' | 'done' | 'error' | 'blocked';
+        listings_found: number | null;
+        new_listings: number | null;
+        error_message: string | null;
+        progress: number | null;
+      };
+    }>(`/api/presets/${presetId}/last-session`),
+    enabled: presetId !== null,
+    refetchInterval: enabled ? 2000 : false,
   });
 }
 

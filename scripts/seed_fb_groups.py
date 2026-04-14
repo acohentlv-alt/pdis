@@ -62,7 +62,7 @@ async def main():
                     (group_id, name, url),
                 )
                 row = await cur.fetchone()
-                if row and row[0]:
+                if row and row.get("was_inserted"):
                     inserted += 1
                 else:
                     updated += 1

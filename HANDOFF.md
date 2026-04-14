@@ -1,73 +1,87 @@
-# HANDOFF — April 14, 2026
+# HANDOFF — April 15, 2026
 
 ## What we did today
 
-Shipped **3 features + 1 major integration** across 4 commits to main:
+Two big features shipped + pushed to main:
 
-1. **Amit Fit UX polish** (commit `9357619`): emerald cross-preset Amit Fit pill on dashboard; 7-source PresetManager dropdown (Yad2/Madlan/Facebook + all combos); inactive presets hidden from pill strip; legacy `both` → `yad2_madlan` normalized; Yad2 forsale scanner cleanly skips with `status='skipped_vm'` when VM flag is on.
+1. **FB groups multi-select preset + sqm regex** (commit `2986523`): new `fb_groups` catalog table, two endpoints (`GET /api/fb-groups` for the catalog, `GET /api/fb-groups/active` for the VM scraper driver), checkbox multi-select inside PresetManager with empty-state message, scanner FB-skip (was dormant bug — would've scraped FB preset as Yad2), PUT `/api/presets` fixed to preserve `fb_groups` on rename (silent-wipe bug caught in review), VM scraper now pulls active groups from API instead of `groups.json`. Plus Hebrew/English sqm regex in `_extract_sqm()` on the scraper — unblocks Amit Fit + below_avg_price signals on FB posts once they land. QA 17/17 after one regex-fix (m2 variant).
 
-2. **Auto-reclassify on threshold/feature-adjustment edits** (part of commit `9357619`): saving in PresetManager now immediately recomputes buyer_fit_tags for the affected neighborhood+category, with TRIM to handle Madlan rows that only match by name. Wrapped in try/except — threshold save always succeeds even if recompute fails (returns `recompute_warning` in 200 response).
+2. **Scan button UX + real progress bar** (uncommitted — still on local, see "Watch out for"): click Scan → button reads `Scanning 42%` with live emerald bar, ticks every 1.5s, pulls real percentage from scanner module state (no DB hit on every poll). Other presets disable with "Scan running" while any scan is active. Per-preset `Last scan: Xm ago · N listings` line. Dismissible red error banner for failures. Scheduled/cron scans intentionally have no bar (MVP limit). New `progress` column on `scan_sessions`, `_update_progress()` helper, phase ticks (snapshot=92, events=95, matches=97, signals=99, done=100). Error message scrubber truncates to 200 chars and strips URLs. `PresetRow` extracted as local component — hooks before early return (React #310 burned us 3x; explicit comment in code).
 
-3. **Govmap closed-sale comps integration** (commits `86dce73`, `6a62f83`, `2078efd`): new `closed_transactions` table, tiered comps lookup (building via gush+parcel → 30m radius → 150m street → neighborhood), 2 new signals (`below_closed_comps`, `above_closed_comps_20pct`), Closed Comps panel on PropertyDetailPage with English Tax Authority attribution, emerald/gray card badge, VM scraper for TLV grid walk with monthly refresh.
+Also ran FB enumeration end-to-end: cookies exported on laptop (fb_state.json, 9 cookies), `scripts/enumerate_fb_groups.py` found 49 groups, `scripts/seed_fb_groups.py` upserted into Neon. Catalog is live — Alan can now open PresetManager and tick groups.
 
-4. **Oracle VM setup for govmap scraper** — cloned repo, set up venv + deps, wrote `.env` with shared `INGEST_SECRET`, verified end-to-end: `test_govmap.py` POSTed 2 Lev-Ha'ir deals → HTTP 200 → rows in Neon. Two bugs found + fixed live: wrong base URL (`api.govmap.gov.il/govmap/api` → 403; correct is `www.govmap.gov.il/api/real-estate`), missing centroid on per-deal response (patched to fall back to grid query point).
-
-QA: 17/17 Amit Fit work + 20/20 govmap work — 0 console errors, 0 React #310. All 4 commits auto-deployed to Render.
+Govmap backfill still running on Oracle VM: ~1843/7676 grid points (24%), 22,694 deals sent, no errors. Will keep chugging overnight.
 
 ## What's half-done
 
-### Govmap TLV full backfill — ready to run, not started
-The VM is fully set up and verified working (one small test inserted 2 real deals). The full 14-42h grid walk needs to be kicked off in a `tmux` session so SSH disconnect doesn't kill it. This should run on a weekend. Exact command is in TASKS.md → "READY TO RUN" section.
+### FB groups deployment — catalog seeded, VM scraper not yet running
+4 of 6 deployment steps complete:
+- [x] Code shipped to Render
+- [x] Alan ran `enumerate_fb_groups.py` on laptop (49 groups captured)
+- [x] Alan ran `seed_fb_groups.py` against Neon (49 upserted)
+- [ ] Alan still needs to tick groups in PresetManager UI (hard-refresh browser first)
+- [ ] VM scraper deployment: `scp fb_state.json` to VM, install playwright on VM, test run, install cron at 08:00/18:00 Israel time
+- [ ] `FB_INGESTION_ENABLED=true` on Render
 
-### Feature flags state on Render
-- `INGEST_SECRET` — set ✅
-- `GOVMAP_INGESTION_ENABLED=true` — set ✅ (ingest endpoint active)
-- `YAD2_VM_INGESTION_ENABLED=false` — set ✅ (Render still tries local Yad2 forsale; flip to true AFTER Yad2 VM cron is running)
-- `FB_INGESTION_ENABLED` — NOT SET (FB scraper deployment still pending from days-old brief)
+Until the last two steps are done and cron fires, zero FB posts will appear in PDIS even with groups ticked.
 
-## What to do next (next session)
+### ₪/m² math issue on property cards — NOT FIXED
+Alan noticed: first property card shows `4,299,999 ₪ · 82m² (95 total) · 52,439 ₪/m²`. The math is using the smaller/build area (82) to compute ₪/m², inflating the rate vs Israeli real estate convention (which uses gross/total area, 95). Should use the larger number, or show both. One-liner fix in PropertyCard.tsx — not touched tonight.
 
-**Highest priority:** walk Alan through kicking off the govmap full backfill in a tmux session (see TASKS.md command block). Monitor via `tail -f /tmp/govmap_full.log`. Once it finishes, verify ~500k-1M rows in `closed_transactions` and that a Florentin property shows the Closed Comps panel with real comps.
+### Govmap backfill — running but slower than initial projection
+At 24% after ~4-5h. Extrapolation now: ~20h total (was 8-9h earlier estimate). Will finish overnight or tomorrow. No errors, no action needed — just let it run.
 
-**Second priority:** add the monthly cron entry on the VM so the govmap scraper refreshes deals automatically on 1st of each month at 3am Israel time. Exact crontab block is in TASKS.md.
+### Scan UX code is on disk but NOT committed
+10 modified files sitting uncommitted: `pdis/database.py`, `pdis/scanner.py`, `pdis/scraper.py`, `pdis/scraper_madlan.py`, `pdis/api/routes.py`, `frontend/src/api/client.ts`, `frontend/src/api/queries.ts`, `frontend/src/components/PresetManager.tsx`, `scripts/seed_fb_groups.py` (dict-access bugfix), `TASKS.md`. End-session commit will push these — Render will auto-deploy.
 
-**Third priority:** complete the long-pending FB scraper deployment (8-step checklist in TASKS.md). INGEST_SECRET is already set; just need FB env vars + cookie export + SCP.
+## What to do next
+
+**Highest priority — 5 minutes of Alan's time:**
+1. Hard-refresh browser (Cmd+Shift+R) after the end-session push deploys to Render.
+2. Open PresetManager → edit the FB preset → see 49 checkboxes → tick the TLV-rental ones (skip Claude community, finance, French security, etc.) → Save.
+3. Click Run Now on a Yad2 preset and verify the new scan progress bar works in the deployed UI (it was tested locally; verify on Render).
+
+**Second — the 30-45 min deployment:**
+4. SCP `vm-scraper/fb_state.json` to the Oracle VM, install playwright on the VM venv, do a manual test run of `vm-scraper/run.py` to confirm FB ingest end-to-end, then install the twice-daily cron, then flip `FB_INGESTION_ENABLED=true` on Render.
+
+**Third — quick UX polish:**
+5. Fix the ₪/m² math in PropertyCard.tsx: prefer gross/total area over build area for the per-sqm rate display. Consider showing both when they differ. One-line change in the component.
+
+**Fourth — govmap backfill wrap-up:**
+6. Check backfill status tomorrow. When it hits 100%, verify row count (`SELECT COUNT(*) FROM closed_transactions`) — expect 500k–1M for full TLV. Install the monthly cron on the VM (block already in prior TASKS_2026-04-14.md).
 
 ## Watch out for
 
-- **Govmap `/street-deals/` endpoint does NOT return per-deal coords.** All deals in one polygon share the same building — centroid has to come from the grid query point (±200m). Fixed in commit `2078efd`; do not regress.
+- **End-session commit is fat — 10 files, ~400 lines net added.** All reviewed in scan-UX brief, no surprises, but it's a bigger push than usual. Render auto-deploy will take ~3 min after push.
 
-- **Govmap base URL is `https://www.govmap.gov.il/api/real-estate/`** — NOT `api.govmap.gov.il/govmap/api` (that returns 403). Fixed in commit `6a62f83`; hardcoded at `run_govmap.py:64`.
+- **FB cookies on laptop (`fb_state.json`) + VM scraper running simultaneously = FB ban risk** once the VM goes live. Rule: stay logged out of FB on your laptop browser, or use a separate profile. Already logged out today — just remember.
 
-- **Alan's terminal mangles multi-line pastes** during SSH sessions — long commands get split with inserted newlines mid-line. When giving commands to run on the VM, keep to single short lines or use `nano`/`sed` to edit files.
+- **The FB preset shows zero posts on the dashboard right now.** Not a bug. No ingest has ever happened. Also per commit `9357619`, pure-FB presets are intentionally hidden from the dashboard pill strip — FB listings will surface as FB-badged cards inside mixed-source views once data flows.
 
-- **Florentin forsale 60-70 bucket** was bumped during QA testing (pref 35000→37000, max 40000→45000). I restored to 35000/40000 after QA. If Amit's original values differ, check with him.
+- **uvicorn was killed once tonight (`zsh: killed`).** Not OOM (checked macOS jetsam logs — clean). Probably a `--reload` worker fluke. If running local dev, skip `--reload` until a pattern emerges: `python3 -m uvicorn pdis.api.main:app --port 8000`.
 
-- **Render auto-deploy is actually working** (verified live today — memory from past sessions claiming it was broken has been updated). Push to main → auto deploys. No manual Render click needed anymore.
+- **Govmap rework scope (drop averages, show raw building-level deals) is still planned but not touched.** Alan approved Option 2 — show last 3-5 raw closed sales per building, no neighborhood medians. Not started because FB groups took the session. That's the next big feature after FB is flowing.
 
-- **Classification column is vestigial** — persist_signals_batch writes signal_details only. Tier (hot/warm/cold) column doesn't auto-update but nothing in UI reads it anymore since stale-code cleanup commit `8264349`.
+- **Seed script had a bug** (`row[0]` vs `row["was_inserted"]`) caught during Alan's first run — fixed tonight. Included in this commit.
 
-- **Server was left running locally** on port 8000 from QA. Kill with `pkill -f "uvicorn pdis.api.main"` if needed.
+## Test these
 
-## Test these (after backfill lands)
-
-- Open a Florentin property in the UI → Closed Comps panel renders with real data (not synthetic QA fixtures).
-- Any property where `closed_comp_source='building'` fires a `below_closed_comps` or `above_closed_comps_20pct` signal → PropertyCard shows emerald/gray "−X% vs building median" pill.
-- Verify the monthly cron actually fires on May 1st — check `/tmp/govmap_cron.log` on the VM.
-- After FB deployment: `SELECT COUNT(*) FROM properties WHERE source='facebook'` should grow daily.
+- [ ] After Render deploys this commit: click Run Now on a Yad2 preset in the UI. Button shows `Scanning X%`. Progress bar visible. Ticks up smoothly (3s transitions). Finishes at 100%, bar disappears, `Last scan: 0m ago · N listings` line updates.
+- [ ] Trigger a scan while another is running → red error banner appears with readable message (not `API error: 409`).
+- [ ] Edit the FB preset, tick a few groups, Save. Reopen edit → ticks persist. Rename the preset via PUT, reopen → ticks STILL persist (the regression test for the PUT-wipes-fb_groups bug).
+- [ ] Check `SELECT COUNT(*) FROM fb_groups WHERE is_active = TRUE` — expect 49.
+- [ ] Once VM scraper is running: `SELECT COUNT(*) FROM properties WHERE source='facebook'` should grow after each scrape run.
+- [ ] Govmap: `SELECT COUNT(*) FROM closed_transactions` growing over time, no Antarctica coords (lat should be ~32, lng ~34.7).
 
 ## Deployment state cheat-sheet
 
 | Thing | State | Notes |
 |---|---|---|
 | Render backend | ✅ live | auto-deploys on push |
-| INGEST_SECRET | ✅ set | `921dab0...54e` — shared across FB/Yad2/Govmap VM scrapers |
-| Oracle VM | ✅ reachable | `ssh -i ~/.ssh/oracle_vm ubuntu@129.159.158.214` |
-| VM pdis repo | ✅ cloned | `~/pdis` — last pulled commit `2078efd` |
-| VM venv | ✅ built | `~/pdis/venv` — all deps installed (pyproj, curl_cffi, httpx, playwright) |
-| VM `.env` | ✅ set | `~/pdis/vm-scraper/.env` — has INGEST_SECRET + PDIS_API_URL |
-| Govmap ingest flag | ✅ enabled | `GOVMAP_INGESTION_ENABLED=true` on Render |
-| Govmap test run | ✅ pass | 2 deals in `closed_transactions` from Lev Ha'ir |
-| Govmap full backfill | ⏳ pending | needs weekend + tmux |
-| Yad2 forsale VM | ⏳ pending | flag false, cron not installed |
-| FB scraper VM | ⏳ pending | cookies not exported, cron not installed |
+| FB groups catalog | ✅ seeded | 49 groups in Neon |
+| FB preset UI | ⏳ needs hard-refresh | check after Render deploys this commit |
+| FB VM scraper | ❌ not deployed | Alan's ~30 min task |
+| `FB_INGESTION_ENABLED` | ❌ off | flip after VM cron verified |
+| Govmap backfill | 🏃 ~24% | running on VM, tmux session `govmap` |
+| Govmap monthly cron | ❌ not installed | after backfill completes |
+| ₪/m² math fix | ❌ not started | 1-line change, quick win |

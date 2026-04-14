@@ -13,3 +13,4 @@ vm-scraper/state.json
 vm-scraper/fb_state.json
 vm-scraper/.env
 vm-scraper/.consecutive_empty
+scripts/fb_groups_discovered.json

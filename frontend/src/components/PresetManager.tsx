@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
-import { useAllPresets, useNeighborhoods, useThresholds, useFeatureAdjustments, useFbGroups } from '../api/queries';
+import { useState, useEffect, useRef, type ReactElement } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useAllPresets, useNeighborhoods, useThresholds, useFeatureAdjustments, useFbGroups, useScanStatus, usePresetLastSession } from '../api/queries';
 import {
   useCreatePreset,
   useUpdatePreset,
@@ -243,8 +244,229 @@ function sourceLabel(preset: Record<string, unknown>): string {
   }
 }
 
+function formatTimeAgo(isoString: string | null | undefined): string {
+  if (!isoString) return 'unknown';
+  const diffMs = Date.now() - new Date(isoString).getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return 'just now';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  return `${Math.floor(diffHr / 24)}d ago`;
+}
+
+interface PresetRowProps {
+  preset: Record<string, unknown>;
+  editingId: number | null;
+  activeScanPresetId: number | null;
+  setActiveScanPresetId: (id: number | null) => void;
+  scanStatus: { running: boolean; progress: number | null } | undefined;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  scanPreset: any;
+  startEdit: (preset: Record<string, unknown>) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  clonePreset: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  togglePreset: any;
+  confirmDeleteId: number | null;
+  setConfirmDeleteId: (id: number | null) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  deletePreset: any;
+  handleDelete: (id: number) => void;
+  setScanError: (msg: string | null) => void;
+  hoodData: { neighborhoods: { hood_id: number; neighborhood: string; listing_count: number }[] } | undefined;
+  PresetForm: ({ title }: { title: string }) => ReactElement;
+}
+
+function PresetRow({
+  preset, editingId, activeScanPresetId, setActiveScanPresetId,
+  scanStatus, scanPreset, startEdit, clonePreset, togglePreset,
+  confirmDeleteId, setConfirmDeleteId, deletePreset, handleDelete,
+  setScanError, hoodData, PresetForm,
+}: PresetRowProps) {
+  // 1. ALL HOOKS FIRST — hooks must be before early returns (CLAUDE.md rule, React #310)
+  const { data: lastSessionData } = usePresetLastSession(
+    preset.id as number,
+    activeScanPresetId === (preset.id as number)
+  );
+
+  // 2. DERIVED VALUES
+  const id = preset.id as number;
+  const isEditing = editingId === id;
+  const isActive = preset.is_active as boolean;
+  const isScanningThis = activeScanPresetId === id;
+  const isAnyScanRunning = scanStatus?.running ?? false;
+  const progress = isScanningThis ? (scanStatus?.progress ?? null) : null;
+  const lastSession = lastSessionData?.session ?? null;
+
+  const priceRange = formatPriceRange(preset.min_price, preset.max_price);
+  const roomsRange = formatRoomsRange(preset.min_rooms, preset.max_rooms);
+  const src = sourceLabel(preset);
+
+  // Neighborhood display — resolve names from hoodData when city matches
+  const hoodStr = preset.neighborhood as string | null;
+  const hoodIds = hoodStr && hoodStr.trim()
+    ? hoodStr.split(',').filter((s: string) => s.trim()).map(Number).filter((n: number) => !isNaN(n))
+    : [];
+  let hoodLabel = 'All neighborhoods';
+  if (hoodIds.length > 0) {
+    const hoodMap = new Map((hoodData?.neighborhoods || []).map((h) => [h.hood_id, h.neighborhood]));
+    const resolvedNames = hoodIds.map((hid: number) => hoodMap.get(hid)).filter(Boolean) as string[];
+    if (resolvedNames.length > 0) {
+      const shown = resolvedNames.slice(0, 2).join(', ');
+      const extra = resolvedNames.length > 2 ? ` +${resolvedNames.length - 2} more` : '';
+      hoodLabel = shown + extra;
+    } else {
+      hoodLabel = `${hoodIds.length} neighborhood${hoodIds.length > 1 ? 's' : ''}`;
+    }
+  }
+
+  // Property types
+  const propTypes = preset.property_types as string[] | null;
+  const propTypesLabel = propTypes && propTypes.length > 0
+    ? propTypes.map((t: string) => PROPERTY_TYPE_OPTIONS.find(o => o.value === t)?.label ?? t).join(', ')
+    : null;
+
+  const meta = [priceRange, roomsRange, src].filter(Boolean).join(' · ');
+
+  // 3. EARLY RETURN AFTER HOOKS
+  if (isEditing) {
+    return (
+      <div key={id}>
+        <PresetForm title={`Editing: ${preset.name as string}`} />
+      </div>
+    );
+  }
+
+  // 4. MAIN RENDER
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+      <div className="flex items-center gap-3">
+        {/* Toggle */}
+        <button
+          onClick={() => togglePreset.mutate(id)}
+          className={`shrink-0 w-10 h-6 rounded-full transition-colors ${isActive ? 'bg-green-500' : 'bg-gray-300'}`}
+          title={isActive ? 'Active — click to deactivate' : 'Inactive — click to activate'}
+        >
+          <span className={`block w-4 h-4 bg-white rounded-full shadow mx-1 transition-transform ${isActive ? 'translate-x-4' : 'translate-x-0'}`} />
+        </button>
+
+        {/* Name + meta */}
+        <div className="flex-1 min-w-0">
+          <div className="font-medium text-sm text-gray-900 truncate">{preset.name as string}</div>
+          {meta && <div className="text-xs text-gray-500 mt-0.5">{meta}</div>}
+          <div className="text-xs text-gray-400 mt-0.5">{hoodLabel}{propTypesLabel ? ` · ${propTypesLabel}` : ''}</div>
+        </div>
+
+        {/* Edit / Delete / Clone / Run Now */}
+        <div className="flex gap-1 shrink-0">
+          <button
+            onClick={() => startEdit(preset)}
+            className="px-2 py-1 text-xs rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50"
+          >Edit</button>
+          <button
+            onClick={() => setConfirmDeleteId(id)}
+            className="px-2 py-1 text-xs rounded-lg border border-red-200 text-red-600 hover:bg-red-50"
+          >Delete</button>
+          <button
+            onClick={() => clonePreset.mutate(id)}
+            disabled={clonePreset.isPending}
+            className="px-2 py-1 text-xs rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50"
+          >Clone</button>
+          {isActive && (
+            <button
+              onClick={() => {
+                setScanError(null);
+                setActiveScanPresetId(id);
+                scanPreset.mutate(id, {
+                  onError: (err: unknown) => {
+                    setActiveScanPresetId(null);
+                    setScanError(err instanceof Error ? err.message : String(err));
+                  },
+                });
+              }}
+              disabled={isScanningThis || (isAnyScanRunning && !isScanningThis)}
+              className="px-2 py-1 text-xs rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isScanningThis
+                ? `Scanning ${progress ?? 0}%`
+                : isAnyScanRunning
+                ? 'Scan running'
+                : 'Run Now'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Last-scan status line */}
+      {(() => {
+        if (!lastSession) return <div className="text-xs text-gray-500 mt-1">Never scanned</div>;
+        const timeAgo = formatTimeAgo(lastSession.finished_at || lastSession.started_at);
+        if (lastSession.status === 'done') {
+          return <div className="text-xs text-gray-500 mt-1">Last scan: {timeAgo} · {lastSession.listings_found ?? 0} listings</div>;
+        }
+        if (lastSession.status === 'error') {
+          return <div className="text-xs text-red-600 mt-1">Last scan failed: {lastSession.error_message || 'unknown error'}</div>;
+        }
+        if (lastSession.status === 'blocked') {
+          return <div className="text-xs text-amber-600 mt-1">Last scan blocked — source returned nothing</div>;
+        }
+        if (lastSession.status === 'running') {
+          return <div className="text-xs text-blue-600 mt-1">Scan in progress…</div>;
+        }
+        return null;
+      })()}
+
+      {/* Progress bar — only shown when this preset's scan is actively running */}
+      {isScanningThis && isAnyScanRunning && (
+        <div className="mt-2 h-1 w-full bg-gray-200 rounded-full overflow-hidden">
+          {progress != null ? (
+            <div
+              className="h-full bg-emerald-500 transition-all duration-[3000ms] ease-out"
+              style={{ width: `${progress}%` }}
+            />
+          ) : (
+            <div className="h-full bg-emerald-500 animate-pulse" style={{ width: '30%' }} />
+          )}
+        </div>
+      )}
+
+      {/* Active badge */}
+      <div className="mt-2">
+        <span className={`inline-block px-2 py-0.5 text-xs rounded-full font-medium ${
+          isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+        }`}>
+          {isActive ? 'Active' : 'Inactive'}
+        </span>
+      </div>
+
+      {/* Delete confirmation */}
+      {confirmDeleteId === id && (
+        <div className="mt-3 bg-red-50 border border-red-200 rounded-lg p-3 space-y-2">
+          <p className="text-sm text-red-700">Delete this preset? Properties found by this preset will be kept.</p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => handleDelete(id)}
+              disabled={deletePreset.isPending}
+              className="flex-1 bg-red-600 text-white rounded-lg py-1.5 text-sm font-medium disabled:opacity-50"
+            >
+              {deletePreset.isPending ? 'Deleting…' : 'Yes, delete'}
+            </button>
+            <button
+              onClick={() => setConfirmDeleteId(null)}
+              className="flex-1 border border-gray-300 rounded-lg py-1.5 text-sm text-gray-700"
+            >Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function PresetManager({ open, onClose, category }: PresetManagerProps) {
   // All hooks at top — before any conditional return
+  const queryClient = useQueryClient();
   const { data, isLoading } = useAllPresets();
   const createPreset = useCreatePreset();
   const updatePreset = useUpdatePreset();
@@ -252,7 +474,11 @@ export default function PresetManager({ open, onClose, category }: PresetManager
   const togglePreset = useTogglePreset();
   const clonePreset = useClonePreset();
   const scanPreset = useScanPreset();
+  const { data: scanStatus } = useScanStatus();
   const { data: fbGroupsData } = useFbGroups();
+
+  const [activeScanPresetId, setActiveScanPresetId] = useState<number | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
 
   const [showCreate, setShowCreate] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -284,6 +510,18 @@ export default function PresetManager({ open, onClose, category }: PresetManager
   const [faExpanded, setFaExpanded] = useState(false);
   const [faHoodExpanded, setFaHoodExpanded] = useState<Record<number, boolean>>({});
   const seededFaKeyRef = useRef<string | null>(null);
+  const prevRunningRef = useRef(false);
+
+  // Detect when a scan finishes (running true→false) and refresh preset stats
+  useEffect(() => {
+    const running = scanStatus?.running ?? false;
+    if (prevRunningRef.current && !running && activeScanPresetId !== null) {
+      queryClient.invalidateQueries({ queryKey: ['presetStats'] });
+      queryClient.invalidateQueries({ queryKey: ['presetLastSession', activeScanPresetId] });
+      setActiveScanPresetId(null);
+    }
+    prevRunningRef.current = running;
+  }, [scanStatus?.running, activeScanPresetId, queryClient]);
 
   useEffect(() => {
     const currentKey = `${editingId ?? 'none'}-${showCreate ? 'create' : 'noedit'}`;
@@ -1088,125 +1326,36 @@ export default function PresetManager({ open, onClose, category }: PresetManager
           <div className="text-center text-gray-400 py-8">No presets yet.</div>
         )}
 
+        {/* Scan error banner */}
+        {scanError && (
+          <div className="mb-3 bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 flex items-start gap-2">
+            <span className="flex-1">{scanError}</span>
+            <button onClick={() => setScanError(null)} className="text-red-600 underline text-xs shrink-0">dismiss</button>
+          </div>
+        )}
+
         {/* Preset list */}
-        {presets.map(preset => {
-          const id = preset.id as number;
-          const isEditing = editingId === id;
-
-          if (isEditing) {
-            return (
-              <div key={id}>
-                <PresetForm title={`Editing: ${preset.name as string}`} />
-              </div>
-            );
-          }
-
-          const isActive = preset.is_active as boolean;
-          const priceRange = formatPriceRange(preset.min_price, preset.max_price);
-          const roomsRange = formatRoomsRange(preset.min_rooms, preset.max_rooms);
-          const src = sourceLabel(preset);
-
-          // Neighborhood display — resolve names from hoodData when city matches
-          const hoodStr = preset.neighborhood as string | null;
-          const hoodIds = hoodStr && hoodStr.trim()
-            ? hoodStr.split(',').filter(s => s.trim()).map(Number).filter(n => !isNaN(n))
-            : [];
-          let hoodLabel = 'All neighborhoods';
-          if (hoodIds.length > 0) {
-            const hoodMap = new Map((hoodData?.neighborhoods || []).map(h => [h.hood_id, h.neighborhood]));
-            const resolvedNames = hoodIds.map(id => hoodMap.get(id)).filter(Boolean) as string[];
-            if (resolvedNames.length > 0) {
-              const shown = resolvedNames.slice(0, 2).join(', ');
-              const extra = resolvedNames.length > 2 ? ` +${resolvedNames.length - 2} more` : '';
-              hoodLabel = shown + extra;
-            } else {
-              hoodLabel = `${hoodIds.length} neighborhood${hoodIds.length > 1 ? 's' : ''}`;
-            }
-          }
-
-          // Property types
-          const propTypes = preset.property_types as string[] | null;
-          const propTypesLabel = propTypes && propTypes.length > 0
-            ? propTypes.map(t => PROPERTY_TYPE_OPTIONS.find(o => o.value === t)?.label ?? t).join(', ')
-            : null;
-
-          const meta = [priceRange, roomsRange, src].filter(Boolean).join(' · ');
-
-          return (
-            <div key={id} className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
-              <div className="flex items-center gap-3">
-                {/* Toggle */}
-                <button
-                  onClick={() => togglePreset.mutate(id)}
-                  className={`shrink-0 w-10 h-6 rounded-full transition-colors ${isActive ? 'bg-green-500' : 'bg-gray-300'}`}
-                  title={isActive ? 'Active — click to deactivate' : 'Inactive — click to activate'}
-                >
-                  <span className={`block w-4 h-4 bg-white rounded-full shadow mx-1 transition-transform ${isActive ? 'translate-x-4' : 'translate-x-0'}`} />
-                </button>
-
-                {/* Name + meta */}
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium text-sm text-gray-900 truncate">{preset.name as string}</div>
-                  {meta && <div className="text-xs text-gray-500 mt-0.5">{meta}</div>}
-                  <div className="text-xs text-gray-400 mt-0.5">{hoodLabel}{propTypesLabel ? ` · ${propTypesLabel}` : ''}</div>
-                </div>
-
-                {/* Edit / Delete / Clone / Run Now */}
-                <div className="flex gap-1 shrink-0">
-                  <button
-                    onClick={() => startEdit(preset)}
-                    className="px-2 py-1 text-xs rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50"
-                  >Edit</button>
-                  <button
-                    onClick={() => setConfirmDeleteId(id)}
-                    className="px-2 py-1 text-xs rounded-lg border border-red-200 text-red-600 hover:bg-red-50"
-                  >Delete</button>
-                  <button
-                    onClick={() => clonePreset.mutate(id)}
-                    disabled={clonePreset.isPending}
-                    className="px-2 py-1 text-xs rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50"
-                  >Clone</button>
-                  {isActive && (
-                    <button
-                      onClick={() => scanPreset.mutate(id)}
-                      disabled={scanPreset.isPending}
-                      className="px-2 py-1 text-xs rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50"
-                    >{scanPreset.isPending ? 'Scanning...' : 'Run Now'}</button>
-                  )}
-                </div>
-              </div>
-
-              {/* Active badge */}
-              <div className="mt-2">
-                <span className={`inline-block px-2 py-0.5 text-xs rounded-full font-medium ${
-                  isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
-                }`}>
-                  {isActive ? 'Active' : 'Inactive'}
-                </span>
-              </div>
-
-              {/* Delete confirmation */}
-              {confirmDeleteId === id && (
-                <div className="mt-3 bg-red-50 border border-red-200 rounded-lg p-3 space-y-2">
-                  <p className="text-sm text-red-700">Delete this preset? Properties found by this preset will be kept.</p>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => handleDelete(id)}
-                      disabled={deletePreset.isPending}
-                      className="flex-1 bg-red-600 text-white rounded-lg py-1.5 text-sm font-medium disabled:opacity-50"
-                    >
-                      {deletePreset.isPending ? 'Deleting…' : 'Yes, delete'}
-                    </button>
-                    <button
-                      onClick={() => setConfirmDeleteId(null)}
-                      className="flex-1 border border-gray-300 rounded-lg py-1.5 text-sm text-gray-700"
-                    >Cancel</button>
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
+        {presets.map(preset => (
+          <PresetRow
+            key={preset.id as number}
+            preset={preset}
+            editingId={editingId}
+            activeScanPresetId={activeScanPresetId}
+            setActiveScanPresetId={setActiveScanPresetId}
+            scanStatus={scanStatus}
+            scanPreset={scanPreset}
+            startEdit={startEdit}
+            clonePreset={clonePreset}
+            togglePreset={togglePreset}
+            confirmDeleteId={confirmDeleteId}
+            setConfirmDeleteId={setConfirmDeleteId}
+            deletePreset={deletePreset}
+            handleDelete={handleDelete}
+            setScanError={setScanError}
+            hoodData={hoodData}
+            PresetForm={PresetForm}
+          />
+        ))}
       </div>
     </div>
   );

@@ -21,6 +21,25 @@ log = logger
 
 _scan_running = False
 _scan_started_at: float | None = None
+_scan_progress: int | None = None   # None when idle, 0-100 while running
+
+
+async def _update_progress(session_id: int, pct: int) -> None:
+    """Update scan progress. Clamps 0-100. Sets module state AND writes to DB.
+    Never fails the scan — log-only on error."""
+    global _scan_progress
+    clamped = max(0, min(100, int(pct)))
+    _scan_progress = clamped
+    try:
+        async with _db.pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "UPDATE scan_sessions SET progress = %s WHERE id = %s",
+                    (clamped, session_id),
+                )
+            await conn.commit()
+    except Exception as exc:
+        logger.warning("scanner.progress_update_failed", session_id=session_id, progress=clamped, error=str(exc))
 
 
 async def _load_preset(preset_id: int) -> dict | None:
@@ -275,6 +294,7 @@ async def _finish_session(
     error_message: str | None = None,
 ) -> None:
     """Update the session row with final counts and status."""
+    global _scan_progress
     async with _db.pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -285,7 +305,8 @@ async def _finish_session(
                     listings_found  = %s,
                     new_listings    = %s,
                     pages_scraped   = %s,
-                    error_message   = %s
+                    error_message   = %s,
+                    progress        = CASE WHEN %s::text = 'done' THEN 100 ELSE progress END
                 WHERE id = %s
                 """,
                 (
@@ -294,10 +315,12 @@ async def _finish_session(
                     new_count,
                     result.pages_scraped,
                     error_message,
+                    status,
                     session_id,
                 ),
             )
         await conn.commit()
+    _scan_progress = None
 
 
 async def _record_preset_stats(preset_id: int, session_id: int) -> None:
@@ -499,11 +522,17 @@ async def run_scan(preset_id: int) -> dict:
             "events_detected": 0, "matches_found": 0, "customer_relistings": 0,
         }
 
+    # Set initial progress to 0 — signals scan has started
+    await _update_progress(session_id, 0)
+
     try:
+        async def progress_cb(p: int) -> None:
+            await _update_progress(session_id, p)
+
         if _source == "madlan":
-            result = await scrape_madlan_preset(dict(preset))
+            result = await scrape_madlan_preset(dict(preset), progress_cb=progress_cb)
         else:
-            result = await scrape_preset(dict(preset))
+            result = await scrape_preset(dict(preset), progress_cb=progress_cb)
 
         if result.was_blocked and len(result.listings) == 0:
             status = "blocked"
@@ -518,6 +547,7 @@ async def run_scan(preset_id: int) -> dict:
 
         total, new_count = await _upsert_properties(result.listings, preset_id, session_id)
         await _create_snapshots(result.listings, session_id)
+        await _update_progress(session_id, 92)
 
         log.info(
             "scanner.upserted",
@@ -541,11 +571,13 @@ async def run_scan(preset_id: int) -> dict:
         # Detect events by comparing to previous snapshots
         event_count = await detect_events(session_id, preset_id)
         log.info("scanner.events_detected", count=event_count)
+        await _update_progress(session_id, 95)
 
         # Find property matches (before signal persistence so year backfills can use confirmed matches)
         match_count = await find_matches(session_id)
         if match_count > 0:
             log.info("scanner.matches_found", count=match_count)
+        await _update_progress(session_id, 97)
 
         # Backfill year_built from matches and building_metadata before signal persistence
         property_ids = await _get_property_ids_for_session(session_id)
@@ -557,6 +589,7 @@ async def run_scan(preset_id: int) -> dict:
         if property_ids:
             await persist_signals_batch(property_ids)
             log.info("scanner.signals_persisted", count=len(property_ids))
+        await _update_progress(session_id, 99)
 
         relist_count = await detect_customer_relistings(session_id)
         if relist_count > 0:
@@ -809,11 +842,16 @@ async def scheduled_scan() -> dict:
     finally:
         _scan_running = False
         _scan_started_at = None
+        # _scan_progress is reset per-session in _finish_session; reset here as safety net
+        # Scheduled/cron scans do NOT surface progress in UI (activeScanPresetId === null)
+        # so this only matters if _finish_session threw before resetting.
+        global _scan_progress
+        _scan_progress = None
 
 
 def get_scan_status() -> dict:
-    """Return current scan running state."""
-    result = {"running": _scan_running}
-    if _scan_running and _scan_started_at:
-        result["running_for_seconds"] = int(_time.time() - _scan_started_at)
-    return result
+    """Return current scan running state. Module state is authoritative — no DB query."""
+    return {
+        "running": _scan_running,
+        "progress": _scan_progress,
+    }
