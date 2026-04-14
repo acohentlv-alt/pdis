@@ -271,6 +271,43 @@ async def get_preset_stats(preset_id: int):
     return {"preset_id": preset_id, "stats": [dict(r) for r in rows]}
 
 
+@router.get("/api/fb-groups")
+async def list_fb_groups():
+    """Return all FB groups ordered by name. Unauthed."""
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT group_id, name, url, is_active FROM fb_groups ORDER BY name ASC"
+            )
+            rows = await cur.fetchall()
+    return {"groups": [dict(r) for r in rows]}
+
+
+@router.get("/api/fb-groups/active")
+async def list_active_fb_groups():
+    """Return FB groups that are active AND referenced by an active facebook-source preset. Unauthed."""
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            # MVP: only presets with source='facebook' exactly drive FB scraping.
+            # Multi-source presets (yad2_facebook, all) are not yet wired through scanner.py routing.
+            await cur.execute(
+                """
+                SELECT DISTINCT fg.group_id, fg.name, fg.url
+                FROM fb_groups fg
+                JOIN search_presets sp
+                  ON sp.is_active = TRUE
+                 AND sp.extra_params->>'source' = 'facebook'
+                 AND fg.group_id = ANY(
+                       SELECT jsonb_array_elements_text(COALESCE(sp.extra_params->'fb_groups', '[]'::jsonb))
+                     )
+                WHERE fg.is_active = TRUE
+                ORDER BY fg.name ASC
+                """
+            )
+            rows = await cur.fetchall()
+    return {"groups": [dict(r) for r in rows]}
+
+
 @router.post("/api/presets")
 async def create_preset(request: Request):
     body = await request.json()
@@ -294,7 +331,8 @@ async def create_preset(request: Request):
     # Advanced filter params stored in extra_params JSONB
     for key in ["min_sqm", "max_sqm", "min_floor", "max_floor", "enter_date",
                 "img_only", "parking", "elevator", "air_conditioning", "balcony",
-                "pets", "furniture", "mamad", "accessible", "property_condition"]:
+                "pets", "furniture", "mamad", "accessible", "property_condition",
+                "fb_groups"]:
         val = body.get(key)
         if val is not None:
             extra_params[key] = val
@@ -358,7 +396,8 @@ async def update_preset(preset_id: int, request: Request):
     for key in ["source", "madlan_city",
                 "min_sqm", "max_sqm", "min_floor", "max_floor", "enter_date",
                 "img_only", "parking", "elevator", "air_conditioning", "balcony",
-                "pets", "furniture", "mamad", "accessible", "property_condition"]:
+                "pets", "furniture", "mamad", "accessible", "property_condition",
+                "fb_groups"]:
         extra_params.pop(key, None)
 
     # Re-apply new source/madlan_city
@@ -371,7 +410,8 @@ async def update_preset(preset_id: int, request: Request):
     # Advanced filter params stored in extra_params JSONB
     for key in ["min_sqm", "max_sqm", "min_floor", "max_floor", "enter_date",
                 "img_only", "parking", "elevator", "air_conditioning", "balcony",
-                "pets", "furniture", "mamad", "accessible", "property_condition"]:
+                "pets", "furniture", "mamad", "accessible", "property_condition",
+                "fb_groups"]:
         val = body.get(key)
         if val is not None:
             extra_params[key] = val
@@ -1993,6 +2033,7 @@ class FacebookPost(BaseModel):
     contact_phone: str | None = None
     price: int | None = None
     rooms: float | None = None
+    square_meters: int | None = None
     neighborhood: str | None = None
     address_city: str | None = None
     image_urls: list[str] = []
@@ -2060,7 +2101,7 @@ async def _fb_post_to_listing(post: FacebookPost) -> ScrapedListing | None:
         rooms=post.rooms,
         floor=None,
         total_floors=None,
-        square_meters=None,
+        square_meters=post.square_meters,
         square_meter_build=None,
         price=post.price,
         currency="ILS",

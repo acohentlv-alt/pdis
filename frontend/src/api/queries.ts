@@ -76,6 +76,13 @@ export function useAllPresets() {
   });
 }
 
+export function useFbGroups() {
+  return useQuery({
+    queryKey: ['fbGroups'],
+    queryFn: () => apiFetch<{ groups: Array<{ group_id: string; name: string; url: string; is_active: boolean }> }>('/api/fb-groups'),
+  });
+}
+
 export function useOpenSearchPresets() {
   return useQuery({
     queryKey: ['openSearchPresets'],

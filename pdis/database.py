@@ -594,6 +594,24 @@ async def seed_presets() -> None:
                        VALUES ('TLV Rent - Facebook', 'rent', '5000', '{"source": "facebook"}'::jsonb)"""
                 )
 
+            # FB groups table — no seed data, populated via scripts/seed_fb_groups.py
+            await cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS fb_groups (
+                    id              SERIAL PRIMARY KEY,
+                    group_id        TEXT NOT NULL UNIQUE,
+                    name            TEXT NOT NULL,
+                    url             TEXT NOT NULL,
+                    is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+                    discovered_at   TIMESTAMPTZ DEFAULT NOW(),
+                    last_seen_at    TIMESTAMPTZ DEFAULT NOW()
+                )
+                """
+            )
+            await cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_fb_groups_is_active ON fb_groups(is_active)"
+            )
+
         await conn.commit()
     logger.info("db.presets_seeded")
 

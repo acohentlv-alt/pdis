@@ -485,6 +485,20 @@ async def run_scan(preset_id: int) -> dict:
             "events_detected": 0, "matches_found": 0, "customer_relistings": 0,
         }
 
+    # FB-skip: facebook scraping is routed through Oracle VM scraper
+    if _source == "facebook":
+        log.info("scanner.fb_preset_skipped_handled_by_vm", preset_id=preset_id, preset_name=preset["name"])
+        await _finish_session(session_id, result, new_count,
+                              status="skipped_vm",
+                              error_message="Facebook scraping routed through Oracle VM")
+        return {
+            "session_id": session_id, "preset_id": preset_id,
+            "preset_name": preset["name"], "status": "skipped_vm",
+            "listings_found": 0, "new_listings": 0, "pages_scraped": 0,
+            "duration_seconds": 0.0, "was_blocked": False, "errors": [],
+            "events_detected": 0, "matches_found": 0, "customer_relistings": 0,
+        }
+
     try:
         if _source == "madlan":
             result = await scrape_madlan_preset(dict(preset))

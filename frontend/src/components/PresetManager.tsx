@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useAllPresets, useNeighborhoods, useThresholds, useFeatureAdjustments } from '../api/queries';
+import { useAllPresets, useNeighborhoods, useThresholds, useFeatureAdjustments, useFbGroups } from '../api/queries';
 import {
   useCreatePreset,
   useUpdatePreset,
@@ -47,6 +47,7 @@ interface PresetFormData {
   mamad: boolean;
   accessible: boolean;
   property_condition: string;
+  fb_groups: string[];
 }
 
 const PROPERTY_TYPE_OPTIONS = [
@@ -117,6 +118,7 @@ const emptyForm = (): PresetFormData => ({
   mamad: false,
   accessible: false,
   property_condition: '',
+  fb_groups: [] as string[],
 });
 
 function validate(form: PresetFormData): string | null {
@@ -147,6 +149,7 @@ function formToPayload(form: PresetFormData): Record<string, unknown> {
     area_code: form.area_code.trim() || null,
     neighborhood: form.neighborhood.trim() || null,
     property_types: form.property_types.length > 0 ? form.property_types : null,
+    fb_groups: form.fb_groups.length > 0 ? form.fb_groups : null,
     min_sqm: form.min_sqm !== '' ? Number(form.min_sqm) : null,
     max_sqm: form.max_sqm !== '' ? Number(form.max_sqm) : null,
     min_floor: form.min_floor !== '' ? Number(form.min_floor) : null,
@@ -190,6 +193,7 @@ function presetToForm(preset: Record<string, unknown>): PresetFormData {
     area_code: (preset.area_code as string) ?? '',
     neighborhood: (preset.neighborhood as string) ?? '',
     property_types: (preset.property_types as string[]) ?? [],
+    fb_groups: Array.isArray(extra.fb_groups) ? (extra.fb_groups as string[]) : [],
     // Advanced filters — from extra_params
     min_sqm: extra.min_sqm != null ? String(extra.min_sqm) : '',
     max_sqm: extra.max_sqm != null ? String(extra.max_sqm) : '',
@@ -248,6 +252,7 @@ export default function PresetManager({ open, onClose, category }: PresetManager
   const togglePreset = useTogglePreset();
   const clonePreset = useClonePreset();
   const scanPreset = useScanPreset();
+  const { data: fbGroupsData } = useFbGroups();
 
   const [showCreate, setShowCreate] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -774,6 +779,51 @@ export default function PresetManager({ open, onClose, category }: PresetManager
                 <option value="6">For preservation</option>
               </select>
             </div>
+
+            {['facebook', 'yad2_facebook', 'madlan_facebook', 'all'].includes(form.source) && (
+              <div>
+                <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Facebook groups</div>
+                {(() => {
+                  const groups = fbGroupsData?.groups ?? [];
+                  if (groups.length === 0) {
+                    return (
+                      <div className="text-xs text-gray-500 border rounded-lg p-3 bg-yellow-50">
+                        No Facebook groups discovered yet. Run <code className="bg-white px-1 rounded">scripts/enumerate_fb_groups.py</code> on your laptop, then <code className="bg-white px-1 rounded">scripts/seed_fb_groups.py</code> to populate this list.
+                      </div>
+                    );
+                  }
+                  const selected = new Set(form.fb_groups);
+                  return (
+                    <>
+                      {selected.size > 0 && (
+                        <div className="text-xs text-gray-500 mb-1">{selected.size} selected</div>
+                      )}
+                      <div className="max-h-48 overflow-y-auto border rounded-lg p-2 space-y-1">
+                        {groups.map(g => {
+                          const isChecked = selected.has(g.group_id);
+                          return (
+                            <label key={g.group_id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => {
+                                  const next = new Set(selected);
+                                  if (isChecked) next.delete(g.group_id);
+                                  else next.add(g.group_id);
+                                  setForm(prev => ({ ...prev, fb_groups: Array.from(next) }));
+                                }}
+                                className="rounded"
+                              />
+                              <span className="flex-1">{g.name}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            )}
           </div>
         )}
 

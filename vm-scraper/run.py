@@ -36,7 +36,6 @@ PROXY_URL = os.environ.get("PROXY_URL", "")
 
 SCRIPT_DIR = pathlib.Path(__file__).parent
 STATE_FILE = SCRIPT_DIR / "state.json"
-GROUPS_FILE = SCRIPT_DIR / "groups.json"
 CONSECUTIVE_EMPTY_FILE = SCRIPT_DIR / ".consecutive_empty"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -131,6 +130,28 @@ _ROOMS_RE = re.compile(r"(\d(?:\.\d)?)\s*חדר")
 _PHONE_RE = re.compile(r"0(?:5[0-9]|[23489])-?\d{3,4}-?\d{4}")
 _BROKER_KEYWORDS = ("תיווך", "מתווך", "סוכן")
 _SKIP_KEYWORDS = ("מחפש שותף", "מחפשת שותף", "שותף לדירה")
+
+# Square-meters extraction — Hebrew and English patterns
+# e.g. "דירה 80 מ"ר", "דירה 80 מטר", "80 sqm", "80 sq m", "80 m²"
+_SQM_HE_QUOTED_RE = re.compile(r"(\d{2,3})\s*מ[\"״]ר")       # 80 מ"ר
+_SQM_HE_METER_RE = re.compile(r"(\d{2,3})\s*מטר")             # 80 מטר
+_SQM_EN_RE = re.compile(r"(\d{2,3})\s*(?:sqm|sq\.?\s*m|m\^?2|m²|square\s*met)", re.IGNORECASE)
+_SQM_MIN = 20
+_SQM_MAX = 500
+
+
+def _extract_sqm(text: str) -> int | None:
+    """Extract square metres from Hebrew/English listing text. Returns None if not found."""
+    for pattern in (_SQM_HE_QUOTED_RE, _SQM_HE_METER_RE, _SQM_EN_RE):
+        m = pattern.search(text)
+        if m:
+            try:
+                val = int(m.group(1))
+                if _SQM_MIN <= val <= _SQM_MAX:
+                    return val
+            except ValueError:
+                pass
+    return None
 _NEIGHBORHOOD_RE = re.compile(
     r"(?:ב|ב-|בשכונת\s+)"
     r"([\u05D0-\u05EA][\u05D0-\u05EA\s]{2,20})"
@@ -248,6 +269,7 @@ def _parse_post(post_el, group_id: str, group_url: str) -> dict | None:
 
         price = _extract_price(description)
         rooms = _extract_rooms(description)
+        sqm = _extract_sqm(description)
         phone = _extract_phone(description)
         neighborhood = _extract_neighborhood(description)
         is_agent_flag = _is_agent(description)
@@ -266,6 +288,7 @@ def _parse_post(post_el, group_id: str, group_url: str) -> dict | None:
             "contact_phone": phone,
             "price": price,
             "rooms": rooms,
+            "square_meters": sqm,
             "neighborhood": neighborhood,
             "address_city": None,  # resolved server-side from group_id
             "image_urls": image_urls,
@@ -365,8 +388,12 @@ def main() -> None:
         log.error("state.json not found at %s — run export_fb_cookies.py first", STATE_FILE)
         raise SystemExit(1)
 
-    with open(GROUPS_FILE) as f:
-        groups = json.load(f)
+    r = httpx.get(f"{PDIS_API_URL}/api/fb-groups/active", timeout=30)
+    r.raise_for_status()
+    groups = r.json()["groups"]
+    if not groups:
+        log.warning("no active FB groups returned by API — nothing to scrape")
+        return
 
     all_posts: list[dict] = []
 
@@ -384,7 +411,8 @@ def main() -> None:
                 log.info("waiting %.0fs before next group", delay)
                 time.sleep(delay)
 
-            posts = _scrape_group(page, group["id"])
+            gid = group.get("group_id") or group["id"]
+            posts = _scrape_group(page, gid)
             all_posts.extend(posts)
 
         browser.close()
