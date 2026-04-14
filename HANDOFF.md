@@ -1,100 +1,73 @@
-# HANDOFF — April 12–13, 2026 (Long Session)
-
----
+# HANDOFF — April 14, 2026
 
 ## What we did today
 
-Planned, reviewed, built, QA'd, committed, and pushed **Facebook Groups as a 3rd data source for PDIS**. 4 planner passes + 4 reviews before exec — the review cycle caught real schema hallucinations each pass (columns that didn't exist, migration dirs that didn't exist, ordering bugs that would have silently broken dedup). Commit `c53e651` on main — Render is auto-deploying. Also rewrote the `planner.md` agent definition to enforce "cite file:line for every claim" and killed the "write BRIEF_*.md" rule that contradicted Alan's memory.
+Shipped **3 features + 1 major integration** across 4 commits to main:
 
-Architecture pivoted mid-session from paid Apify → burner account → **personal FB account on Oracle VM, no proxy, $0/mo** after Alan pushed back on both the Apify subscription and the 4-week burner warmup. The decision to skip residential proxy matches what 4kirot.com appears to do (Firebase Cloud Functions = datacenter IP) — acceptable risk on an aged personal account at 1 scan/day.
+1. **Amit Fit UX polish** (commit `9357619`): emerald cross-preset Amit Fit pill on dashboard; 7-source PresetManager dropdown (Yad2/Madlan/Facebook + all combos); inactive presets hidden from pill strip; legacy `both` → `yad2_madlan` normalized; Yad2 forsale scanner cleanly skips with `status='skipped_vm'` when VM flag is on.
 
----
+2. **Auto-reclassify on threshold/feature-adjustment edits** (part of commit `9357619`): saving in PresetManager now immediately recomputes buyer_fit_tags for the affected neighborhood+category, with TRIM to handle Madlan rows that only match by name. Wrapped in try/except — threshold save always succeeds even if recompute fails (returns `recompute_warning` in 200 response).
 
-## What's live on main (backend auto-deployed)
+3. **Govmap closed-sale comps integration** (commits `86dce73`, `6a62f83`, `2078efd`): new `closed_transactions` table, tiered comps lookup (building via gush+parcel → 30m radius → 150m street → neighborhood), 2 new signals (`below_closed_comps`, `above_closed_comps_20pct`), Closed Comps panel on PropertyDetailPage with English Tax Authority attribution, emerald/gray card badge, VM scraper for TLV grid walk with monthly refresh.
 
-- **`/api/ingest/facebook`** POST (bearer auth with `INGEST_SECRET`, 403 on bad bearer, 503 when `FB_INGESTION_ENABLED=false`)
-- **`/api/ingest/facebook/health`** GET unauth (returns warning_count, last_ok_at, alert flag)
-- **`/api/ingest/facebook/log-reveal`** POST unauth (audit trail for phone reveals)
-- **New `ingest_state` singleton table** for silent-failure tracking
-- **3 new columns on `properties`**: `author_name`, `group_url`, `like_count`
-- **`run_scan_from_listings()`** + **`_mark_fb_removals_for_session()`** in `scanner.py` (FB-scoped removal runs AFTER matching per reviewer Pass 4)
-- **Idempotent FB preset seed** in `database.py` (survives non-empty search_presets)
-- Low-volume guard bypassed on first-ever ingest (`prior_count=0`)
-- **Frontend was already live** from `29706c9` (another session bundled my FB frontend changes into Phase 1C commit): phone mask `054-***-****` with tap-to-reveal on FB cards, indigo FB badge, yellow dashboard banner
+4. **Oracle VM setup for govmap scraper** — cloned repo, set up venv + deps, wrote `.env` with shared `INGEST_SECRET`, verified end-to-end: `test_govmap.py` POSTed 2 Lev-Ha'ir deals → HTTP 200 → rows in Neon. Two bugs found + fixed live: wrong base URL (`api.govmap.gov.il/govmap/api` → 403; correct is `www.govmap.gov.il/api/real-estate`), missing centroid on per-deal response (patched to fall back to grid query point).
 
-**Feature flag `FB_INGESTION_ENABLED=false`** — no behavior change for Shechter until Alan flips it.
-
----
+QA: 17/17 Amit Fit work + 20/20 govmap work — 0 console errors, 0 React #310. All 4 commits auto-deployed to Render.
 
 ## What's half-done
 
-### Alan's ~30 min deployment checklist (nothing technical left for Claude)
-1. Verify Render deploy finished: `curl https://pdis-lsah.onrender.com/api/ingest/facebook/health` returns valid JSON
-2. Verify `TLV_CITY_STRING`: `SELECT DISTINCT address_city FROM properties WHERE source='yad2' LIMIT 5` on Neon — if not `"תל אביב-יפו"`, update the constant in `routes.py` before flipping flag
-3. Generate `INGEST_SECRET`: `openssl rand -hex 32`
-4. Set Render env vars: `INGEST_SECRET=<value>`, `FB_INGESTION_ENABLED=false`, `FB_SCANS_PER_DAY=1`
-5. On laptop: `cd ~/pdis/vm-scraper && python3 export_fb_cookies.py` → log in with personal FB → saves `fb_state.json`
-6. SCP scraper + cookies to Oracle VM (commands in `vm-scraper/README.md`)
-7. Install deps on VM, test-run `./run.sh` manually, verify `posts_found > 0` (this validates m.facebook.com DOM selectors against real FB)
-8. Add crontab with `CRON_TZ=Asia/Jerusalem` at 08:00 + 18:00 with `flock`
-9. Flip `FB_INGESTION_ENABLED=true` → watch first real scan
+### Govmap TLV full backfill — ready to run, not started
+The VM is fully set up and verified working (one small test inserted 2 real deals). The full 14-42h grid walk needs to be kicked off in a `tmux` session so SSH disconnect doesn't kill it. This should run on a weekend. Exact command is in TASKS.md → "READY TO RUN" section.
 
-### VM scraper code is in repo (`vm-scraper/`) but not yet on VM
-Files committed to `~/pdis/vm-scraper/`: `run.py`, `run.sh`, `export_fb_cookies.py`, `groups.json`, `requirements.txt`, `.env.example`, `README.md`. All deployed via `scp -r` when Alan's ready.
-
----
+### Feature flags state on Render
+- `INGEST_SECRET` — set ✅
+- `GOVMAP_INGESTION_ENABLED=true` — set ✅ (ingest endpoint active)
+- `YAD2_VM_INGESTION_ENABLED=false` — set ✅ (Render still tries local Yad2 forsale; flip to true AFTER Yad2 VM cron is running)
+- `FB_INGESTION_ENABLED` — NOT SET (FB scraper deployment still pending from days-old brief)
 
 ## What to do next (next session)
 
-**If Alan has already deployed FB Brief #1 and scrape is running:**
-- Watch the first day of real FB ingest. Check `/api/ingest/facebook/health` for warning counter. Check `properties WHERE source='facebook'` for parse quality.
-- After 1 week of real data, re-plan **Brief #2** (FB-aware dedup, no-broker signal, broker-flooding filter, Nominatim geocoding pass).
+**Highest priority:** walk Alan through kicking off the govmap full backfill in a tmux session (see TASKS.md command block). Monitor via `tail -f /tmp/govmap_full.log`. Once it finishes, verify ~500k-1M rows in `closed_transactions` and that a Florentin property shows the Closed Comps panel with real comps.
 
-**If Alan hasn't deployed yet:**
-- Walk him through the 30-min deployment checklist above.
+**Second priority:** add the monthly cron entry on the VM so the govmap scraper refreshes deals automatically on 1st of each month at 3am Israel time. Exact crontab block is in TASKS.md.
 
-**If blocker hits:**
-- If m.facebook.com DOM selectors broke (posts_found=0 on test run): pivot parser to www.facebook.com mobile emulation. Small change in `vm-scraper/run.py`.
-- If personal account shows "unusual activity" warnings: stop the cron immediately, fall back to Raspberry Pi ($35 one-time) at home for truly residential IP.
-
-**Unrelated parked items:**
-- Telegram bot for scan alerts (not started)
-- Backfill descriptions for ~450 properties (next scan will do it automatically)
-- FB Marketplace integration (PARKED — needs Playwright + image hashing)
-
----
+**Third priority:** complete the long-pending FB scraper deployment (8-step checklist in TASKS.md). INGEST_SECRET is already set; just need FB env vars + cookie export + SCP.
 
 ## Watch out for
 
-- **Phase 1B and 1C Amit Fit shipped today by a parallel session** (commits `02a3366` and `29706c9`). The Phase 1C commit accidentally bundled my FB frontend changes (PropertyCard.tsx phone mask + OpportunityPage.tsx banner) alongside the Amit Fit display work — that's why today's FB commit only touched backend + vm-scraper, no frontend.
-- **`run.sh` was softened from hard-exit to warning** when `PROXY_URL` is unset. That's intentional — Alan chose the 4kirot-style "datacenter IP at low volume" approach. If he ever wants to add residential proxy later (Smartproxy ~$7/mo), just set `PROXY_URL` in VM's `.env`.
-- **`_is_agent` bug caught by tests**: the broker detection was firing True on "ללא תיווך" (WITHOUT broker) posts — inverted behavior. Fixed in `vm-scraper/run.py:166-170` by stripping the negation phrase before keyword matching. Do not regress this.
-- **Low-volume guard bypass**: `scanner.py:579` — on first-ever FB ingest (prior_count=0), threshold drops to 1. Prevents the bootstrap-forever problem. Do not change without thinking through.
-- **Scraper files live in `~/pdis/vm-scraper/`** but deploy to `/opt/pdis-fb-scraper/` on the VM. Different paths — don't confuse.
-- **Never commit `state.json`, `.env`, `fb_state.json`** — all in `.gitignore`.
-- **The `planner.md` rewrite** is now live at `~/.claude/agents/planner.md`. Future `/plan` and `/review` invocations will enforce the "cite file:line" discipline. This prevented pass-2 and pass-3 hallucinations from surviving to production.
+- **Govmap `/street-deals/` endpoint does NOT return per-deal coords.** All deals in one polygon share the same building — centroid has to come from the grid query point (±200m). Fixed in commit `2078efd`; do not regress.
 
----
+- **Govmap base URL is `https://www.govmap.gov.il/api/real-estate/`** — NOT `api.govmap.gov.il/govmap/api` (that returns 403). Fixed in commit `6a62f83`; hardcoded at `run_govmap.py:64`.
 
-## Test these (post-deployment)
+- **Alan's terminal mangles multi-line pastes** during SSH sessions — long commands get split with inserted newlines mid-line. When giving commands to run on the VM, keep to single short lines or use `nano`/`sed` to edit files.
 
-- Hit `/api/ingest/facebook/health` in Render — valid JSON response
-- Run the scraper manually once on VM — check `posts_found > 0` in log
-- Flip flag to true, wait 10 min, `SELECT COUNT(*) FROM properties WHERE source='facebook'` — should be nonzero
-- Open PDIS in browser, find an FB property, tap the eye icon — full phone reveals
-- Refresh — phone re-masks
-- Yad2 cards unchanged (no eye icon, phone always visible)
+- **Florentin forsale 60-70 bucket** was bumped during QA testing (pref 35000→37000, max 40000→45000). I restored to 35000/40000 after QA. If Amit's original values differ, check with him.
 
----
+- **Render auto-deploy is actually working** (verified live today — memory from past sessions claiming it was broken has been updated). Push to main → auto deploys. No manual Render click needed anymore.
 
-## Cost summary
+- **Classification column is vestigial** — persist_signals_batch writes signal_details only. Tier (hot/warm/cold) column doesn't auto-update but nothing in UI reads it anymore since stale-code cleanup commit `8264349`.
 
-| Item | Monthly |
-|---|---|
-| Oracle VM | $0 (free tier, existing) |
-| Residential proxy | $0 (not subscribing — datacenter IP accepted) |
-| Playwright / Chromium | $0 |
-| **Total** | **$0/mo** |
+- **Server was left running locally** on port 8000 from QA. Kill with `pkill -f "uvicorn pdis.api.main"` if needed.
 
-If burner-replacement ever becomes needed: Raspberry Pi $35 one-time, or fallback to Apify ~$5–10/mo.
+## Test these (after backfill lands)
 
+- Open a Florentin property in the UI → Closed Comps panel renders with real data (not synthetic QA fixtures).
+- Any property where `closed_comp_source='building'` fires a `below_closed_comps` or `above_closed_comps_20pct` signal → PropertyCard shows emerald/gray "−X% vs building median" pill.
+- Verify the monthly cron actually fires on May 1st — check `/tmp/govmap_cron.log` on the VM.
+- After FB deployment: `SELECT COUNT(*) FROM properties WHERE source='facebook'` should grow daily.
+
+## Deployment state cheat-sheet
+
+| Thing | State | Notes |
+|---|---|---|
+| Render backend | ✅ live | auto-deploys on push |
+| INGEST_SECRET | ✅ set | `921dab0...54e` — shared across FB/Yad2/Govmap VM scrapers |
+| Oracle VM | ✅ reachable | `ssh -i ~/.ssh/oracle_vm ubuntu@129.159.158.214` |
+| VM pdis repo | ✅ cloned | `~/pdis` — last pulled commit `2078efd` |
+| VM venv | ✅ built | `~/pdis/venv` — all deps installed (pyproj, curl_cffi, httpx, playwright) |
+| VM `.env` | ✅ set | `~/pdis/vm-scraper/.env` — has INGEST_SECRET + PDIS_API_URL |
+| Govmap ingest flag | ✅ enabled | `GOVMAP_INGESTION_ENABLED=true` on Render |
+| Govmap test run | ✅ pass | 2 deals in `closed_transactions` from Lev Ha'ir |
+| Govmap full backfill | ⏳ pending | needs weekend + tmux |
+| Yad2 forsale VM | ⏳ pending | flag false, cron not installed |
+| FB scraper VM | ⏳ pending | cookies not exported, cron not installed |
