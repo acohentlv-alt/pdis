@@ -196,6 +196,7 @@ export function useScanPreset() {
       qc.invalidateQueries({ queryKey: ['presetProperties'] });
       qc.invalidateQueries({ queryKey: ['presetStats'] });
       qc.invalidateQueries({ queryKey: ['amitFitProperties'] });
+      qc.invalidateQueries({ queryKey: ['closedComps'] });
     },
   });
 }

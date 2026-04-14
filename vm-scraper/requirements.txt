@@ -2,3 +2,4 @@ playwright>=1.40
 httpx>=0.25
 python-dotenv>=1.0
 curl_cffi>=0.7
+pyproj>=3.6

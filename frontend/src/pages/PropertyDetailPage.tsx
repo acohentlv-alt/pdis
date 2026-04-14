@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useProperty, useSignals, useEvents, useOperatorInput, useMatches } from '../api/queries';
+import { useProperty, useSignals, useEvents, useOperatorInput, useMatches, useClosedComps } from '../api/queries';
 import { useWhitelist, useRemoveWhitelist, useBlacklist, useRemoveBlacklist, useAddFavorite, useRemoveFavorite } from '../api/mutations';
 import { formatPrice, formatPricePerSqm, formatDate, formatDateFull, SIGNAL_LABELS } from '../lib/format';
 import LifecycleTimeline from '../components/LifecycleTimeline';
@@ -55,6 +55,7 @@ export default function PropertyDetailPage() {
   const { data: eventsData } = useEvents(yad2Id);
   useOperatorInput(yad2Id);
   const { data: matchesData } = useMatches(yad2Id);
+  const { data: compsData } = useClosedComps(yad2Id);
 
   const whitelist = useWhitelist();
   const removeWhitelist = useRemoveWhitelist();
@@ -346,6 +347,47 @@ export default function PropertyDetailPage() {
           </Section>
         );
       })()}
+
+      {/* Closed Comps */}
+      {compsData && compsData.count > 0 && (
+        <Section title="Closed Comps">
+          <div className="text-sm text-gray-700 space-y-1">
+            <div>{compsData.count} closed sales in this {compsData.source_level} — last 24 months</div>
+            {compsData.median_pps && (
+              <>
+                <div><span className="text-gray-500">Median:</span> ₪{compsData.median_pps.toLocaleString()}/m²</div>
+                {price && sqm && (
+                  <div>
+                    <span className="text-gray-500">This listing:</span> ₪{Math.round(price / sqm).toLocaleString()}/m²
+                    {(() => {
+                      const deltaPct = ((price / sqm) - compsData.median_pps) / compsData.median_pps * 100;
+                      return (
+                        <span className={deltaPct <= 0 ? 'text-green-700 ml-2' : 'text-red-700 ml-2'}>
+                          {deltaPct > 0 ? '+' : ''}{deltaPct.toFixed(1)}%
+                        </span>
+                      );
+                    })()}
+                  </div>
+                )}
+              </>
+            )}
+            <div className="border-t pt-2 mt-2 space-y-1">
+              {compsData.deals.slice(0, 5).map(d => (
+                <div key={d.deal_id} className="text-xs text-gray-500 flex justify-between gap-2">
+                  <span>{new Date(d.deal_date).toLocaleDateString('en-GB')}</span>
+                  <span>{d.sqm ? `${d.sqm}m²` : '—'}</span>
+                  <span>{d.floor != null ? `fl ${d.floor}` : '—'}</span>
+                  <span>₪{d.sale_price.toLocaleString()}</span>
+                  <span className="text-blue-600">{d.price_per_sqm ? `₪${d.price_per_sqm.toLocaleString()}/m²` : '—'}</span>
+                </div>
+              ))}
+            </div>
+            <div className="text-[10px] text-gray-400 pt-2 border-t">
+              Closed-sale data: Israel Tax Authority (govmap.gov.il)
+            </div>
+          </div>
+        </Section>
+      )}
 
       {/* Signals */}
       <Section title="Signals">

@@ -40,5 +40,7 @@ export const SIGNAL_LABELS: Record<string, string> = {
   listed_30_60_days: "Listed 30-60 days",
   desc_changes: "Description changed",
   img_changes: "Images changed",
+  below_closed_comps: "Below closed-sale comps",
+  above_closed_comps_20pct: "Above closed comps (20%+)",
 };
 

@@ -1290,6 +1290,19 @@ async def get_property_signals(yad2_id: str):
     }
 
 
+@router.get("/api/properties/{yad2_id}/comps")
+async def get_comps(yad2_id: str):
+    from pdis.comps import compute_building_comps
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT id FROM properties WHERE yad2_id = %s", (yad2_id,))
+            row = await cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Property not found")
+            pid = row["id"]
+    return await compute_building_comps(pid, lookback_months=24)
+
+
 # ---------------------------------------------------------------------------
 # Whitelist / Blacklist
 # IMPORTANT: /api/whitelist/ids and /api/blacklist/ids must be registered
@@ -2234,3 +2247,93 @@ async def yad2_ingest(request: Request, body: Yad2IngestBody):
 
     result = await run_scan_from_listings(body.preset_id, listings, source="yad2")
     return result
+
+
+# ---------------------------------------------------------------------------
+# Govmap closed-sale ingestion
+# ---------------------------------------------------------------------------
+
+class GovmapDeal(BaseModel):
+    deal_id: str
+    polygon_id: str
+    gush_num: int | None = None
+    parcel_num: int | None = None
+    sub_parcel_num: int | None = None
+    settlement: str | None = None
+    neighborhood: str | None = None
+    street: str | None = None
+    house_number: str | None = None
+    floor: int | None = None
+    rooms: float | None = None
+    sqm: int | None = None
+    sale_price: int
+    deal_date: str
+    year_built: int | None = None
+    shape_wkt: str | None = None
+    centroid_lat: float | None = None
+    centroid_lng: float | None = None
+    raw_data: dict | None = None
+
+
+class GovmapIngestBody(BaseModel):
+    deals: list[GovmapDeal]
+
+
+@router.post("/api/ingest/govmap-deals")
+async def govmap_ingest(request: Request, body: GovmapIngestBody):
+    from pdis.config import settings as _settings
+    auth = request.headers.get("Authorization", "")
+    expected = f"Bearer {_settings.ingest_secret}" if _settings.ingest_secret else None
+    if not expected or auth != expected:
+        raise HTTPException(status_code=403, detail="Invalid or missing ingest secret")
+    if not getattr(_settings, "govmap_ingestion_enabled", False):
+        raise HTTPException(status_code=503, detail="Govmap ingestion is disabled")
+
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            for d in body.deals:
+                params = {**d.model_dump()}
+                params["raw_data"] = json.dumps(d.raw_data) if d.raw_data else None
+                await cur.execute("""
+                    INSERT INTO closed_transactions (
+                        deal_id, polygon_id, gush_num, parcel_num, sub_parcel_num,
+                        settlement, neighborhood, street, house_number,
+                        floor, rooms, sqm, sale_price, deal_date, year_built,
+                        shape_wkt, centroid_lat, centroid_lng, raw_data
+                    ) VALUES (
+                        %(deal_id)s, %(polygon_id)s, %(gush_num)s, %(parcel_num)s, %(sub_parcel_num)s,
+                        %(settlement)s, %(neighborhood)s, %(street)s, %(house_number)s,
+                        %(floor)s, %(rooms)s, %(sqm)s, %(sale_price)s, %(deal_date)s, %(year_built)s,
+                        %(shape_wkt)s, %(centroid_lat)s, %(centroid_lng)s, %(raw_data)s
+                    )
+                    ON CONFLICT (deal_id) DO UPDATE SET
+                        polygon_id=EXCLUDED.polygon_id,
+                        gush_num=EXCLUDED.gush_num,
+                        parcel_num=EXCLUDED.parcel_num,
+                        settlement=EXCLUDED.settlement,
+                        neighborhood=EXCLUDED.neighborhood,
+                        street=EXCLUDED.street,
+                        house_number=EXCLUDED.house_number,
+                        floor=EXCLUDED.floor,
+                        rooms=EXCLUDED.rooms,
+                        sqm=EXCLUDED.sqm,
+                        sale_price=EXCLUDED.sale_price,
+                        deal_date=EXCLUDED.deal_date,
+                        year_built=EXCLUDED.year_built,
+                        shape_wkt=EXCLUDED.shape_wkt,
+                        centroid_lat=EXCLUDED.centroid_lat,
+                        centroid_lng=EXCLUDED.centroid_lng,
+                        raw_data=EXCLUDED.raw_data,
+                        imported_at=NOW()
+                """, params)
+        await conn.commit()
+    return {"inserted_or_updated": len(body.deals)}
+
+
+@router.get("/api/govmap/imported-polygons")
+async def govmap_imported_polygons():
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT DISTINCT polygon_id FROM closed_transactions")
+            rows = await cur.fetchall()
+    return {"polygon_ids": [r["polygon_id"] for r in rows]}

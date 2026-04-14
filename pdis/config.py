@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     fb_ingestion_enabled: bool = False
     fb_scans_per_day: int = 2
     yad2_vm_ingestion_enabled: bool = False
+    govmap_ingestion_enabled: bool = False
 
 
 settings = Settings()

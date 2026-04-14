@@ -103,6 +103,10 @@ export default function PropertyCard({
   const hasAmitPill =
     signalDetails?.buyer_fit_tags?.includes('below_amit_target') ||
     signalDetails?.buyer_fit_tags?.includes('close_to_amit_target');
+  const hasBelowClosed = signalDetails?.strong_signals?.includes('below_closed_comps');
+  const hasAboveClosed = signalDetails?.strong_signals?.includes('above_closed_comps_20pct');
+  const closedSource = sd.closed_comp_source as string | undefined;
+  const closedPct = sd.closed_comp_pct_vs_median as number | undefined;
   const addressText = hasAddress
     ? `, ${String(item.address_street || '')}${item.address_home_number ? ` ${String(item.address_home_number)}` : ''}`
     : '';
@@ -160,7 +164,12 @@ export default function PropertyCard({
               Close · +{Math.abs(Math.round(signalDetails.amit_pct_vs_preferred as number))}%
             </span>
           )}
-          {!hasAmitPill && belowAvgPrice && <span className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full">Below avg</span>}
+          {!hasAmitPill && !hasBelowClosed && belowAvgPrice && <span className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full">Below avg</span>}
+          {(hasBelowClosed || hasAboveClosed) && (closedSource === 'building' || closedSource === 'street') && closedPct != null && (
+            <span className={`text-xs px-2 py-0.5 rounded-full ${hasBelowClosed ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-600'}`}>
+              {hasBelowClosed ? '−' : '+'}{Math.abs(Math.round(closedPct * 100))}% vs {closedSource} median
+            </span>
+          )}
         </div>
         {source === 'facebook' && (item.contact_phone as string | null) && (
           <div className="flex items-center gap-2 text-sm">

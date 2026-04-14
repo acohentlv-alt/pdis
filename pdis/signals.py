@@ -166,6 +166,10 @@ async def compute_signals_batch(property_ids: list[int]) -> dict[int, dict]:
                 if r.get("neighborhood"):
                     fa_by_name[(r["neighborhood"], r["category"])] = dict(r)
 
+        # BATCH QUERY 6: closed-sale comps per property
+        from pdis.comps import compute_building_comps_batch
+        comps_by_pid = await compute_building_comps_batch(property_ids)
+
     # Build threshold lookup dicts
     by_hood_id: dict[tuple, list[dict]] = {}
     by_name: dict[tuple, list[dict]] = {}
@@ -191,7 +195,7 @@ async def compute_signals_batch(property_ids: list[int]) -> dict[int, dict]:
     for pid in property_ids:
         events = events_by_prop.get(pid, [])
         prop = props.get(pid, {})
-        results[pid] = _compute_single(pid, events, prop, hood_avgs, by_hood_id, by_name, fa_by_hood_id, fa_by_name)
+        results[pid] = _compute_single(pid, events, prop, hood_avgs, by_hood_id, by_name, fa_by_hood_id, fa_by_name, comps=comps_by_pid.get(pid))
 
     return results
 
@@ -227,6 +231,7 @@ def _compute_single(
     by_name: dict | None = None,
     fa_by_hood_id: dict | None = None,
     fa_by_name: dict | None = None,
+    comps: dict | None = None,
 ) -> dict:
     """Compute tier-based signals for a single property. Pure function, no DB calls."""
     strong_signals = []
@@ -316,6 +321,22 @@ def _compute_single(
         strong_signals.append("condition_keywords")
     if details["below_avg_price_sqm"]:
         strong_signals.append("below_avg_price")
+
+    # Closed-sale comps signals (orthogonal to Amit Fit)
+    if comps and comps.get("count", 0) > 0 and comps.get("median_pps"):
+        median = comps["median_pps"]
+        listing_pps = price / sqm if sqm > 0 else None
+        if listing_pps:
+            pct = (listing_pps - median) / median
+            details["closed_comp_median_pps"] = median
+            details["closed_comp_count"] = comps["count"]
+            details["closed_comp_source"] = comps["source_level"]
+            details["closed_comp_pct_vs_median"] = round(pct, 3)
+            details["closed_comp_listing_pps"] = round(listing_pps, 1)
+            if pct <= -0.20:
+                strong_signals.append("below_closed_comps")
+            elif pct >= 0.20:
+                strong_signals.append("above_closed_comps_20pct")
 
     # WEAK signals
     if details["price_drops"] > 0 and "price_drop_gt_10pct" not in strong_signals:

@@ -452,6 +452,63 @@ async def run_migrations() -> None:
             for col_def in ["author_name TEXT", "group_url TEXT", "like_count INTEGER"]:
                 await cur.execute(f"ALTER TABLE properties ADD COLUMN IF NOT EXISTS {col_def}")
 
+            # Enrich properties with gush/parcel
+            for col_def in ["gush_num INTEGER", "parcel_num INTEGER", "sub_parcel_num INTEGER"]:
+                await cur.execute(f"ALTER TABLE properties ADD COLUMN IF NOT EXISTS {col_def}")
+            await cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_properties_gush_parcel
+                  ON properties(gush_num, parcel_num)
+            """)
+
+            # New closed_transactions table
+            await cur.execute("""
+                CREATE TABLE IF NOT EXISTS closed_transactions (
+                    deal_id          TEXT PRIMARY KEY,
+                    polygon_id       TEXT NOT NULL,
+                    gush_num         INTEGER,
+                    parcel_num       INTEGER,
+                    sub_parcel_num   INTEGER,
+                    settlement       TEXT,
+                    neighborhood     TEXT,
+                    street           TEXT,
+                    house_number     TEXT,
+                    floor            INTEGER,
+                    rooms            REAL,
+                    sqm              INTEGER,
+                    sale_price       BIGINT NOT NULL,
+                    deal_date        DATE NOT NULL,
+                    year_built       INTEGER,
+                    shape_wkt        TEXT,
+                    centroid_lat     DOUBLE PRECISION,
+                    centroid_lng     DOUBLE PRECISION,
+                    price_per_sqm    INTEGER GENERATED ALWAYS AS
+                                         (CASE WHEN sqm > 0 THEN (sale_price / sqm)::INTEGER END) STORED,
+                    source           TEXT NOT NULL DEFAULT 'govmap',
+                    raw_data         JSONB,
+                    imported_at      TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            await cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_closed_tx_gush_parcel
+                  ON closed_transactions(gush_num, parcel_num)
+            """)
+            await cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_closed_tx_centroid
+                  ON closed_transactions(centroid_lat, centroid_lng)
+            """)
+            await cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_closed_tx_hood_date
+                  ON closed_transactions(neighborhood, deal_date DESC)
+            """)
+            await cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_closed_tx_date
+                  ON closed_transactions(deal_date DESC)
+            """)
+            await cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_closed_tx_polygon
+                  ON closed_transactions(polygon_id)
+            """)
+
             # Ingest state singleton table (tracks per-source health counters)
             await cur.execute("""
                 CREATE TABLE IF NOT EXISTS ingest_state (

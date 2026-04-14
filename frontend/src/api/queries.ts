@@ -49,6 +49,26 @@ export function useMatches(yad2Id: string | undefined) {
   });
 }
 
+export function useClosedComps(yad2Id: string | undefined) {
+  return useQuery({
+    queryKey: ['closedComps', yad2Id],
+    queryFn: () => apiFetch<{
+      median_pps: number | null;
+      count: number;
+      source_level: 'building' | 'street' | 'neighborhood' | 'none';
+      deals: Array<{
+        deal_id: string;
+        deal_date: string;
+        floor: number | null;
+        sqm: number | null;
+        sale_price: number;
+        price_per_sqm: number | null;
+      }>;
+    }>(`/api/properties/${yad2Id}/comps`),
+    enabled: !!yad2Id,
+  });
+}
+
 export function useAllPresets() {
   return useQuery({
     queryKey: ['presets', 'all'],
