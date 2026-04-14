@@ -60,6 +60,7 @@ export function useBlacklist() {
       qc.invalidateQueries({ queryKey: ['property', yad2Id] });
       qc.invalidateQueries({ queryKey: ['blacklistIds'] });
       qc.invalidateQueries({ queryKey: ['blacklistProperties'] });
+      qc.invalidateQueries({ queryKey: ['amitFitProperties'] });
     },
   });
 }
@@ -72,6 +73,7 @@ export function useRemoveBlacklist() {
       qc.invalidateQueries({ queryKey: ['property', yad2Id] });
       qc.invalidateQueries({ queryKey: ['blacklistIds'] });
       qc.invalidateQueries({ queryKey: ['blacklistProperties'] });
+      qc.invalidateQueries({ queryKey: ['amitFitProperties'] });
     },
   });
 }
@@ -129,7 +131,10 @@ export function useCreatePreset() {
         method: 'POST',
         body: JSON.stringify(data),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['presets'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['presets'] });
+      qc.invalidateQueries({ queryKey: ['amitFitProperties'] });
+    },
   });
 }
 
@@ -141,7 +146,10 @@ export function useUpdatePreset() {
         method: 'PUT',
         body: JSON.stringify(data),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['presets'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['presets'] });
+      qc.invalidateQueries({ queryKey: ['amitFitProperties'] });
+    },
   });
 }
 
@@ -150,7 +158,10 @@ export function useDeletePreset() {
   return useMutation({
     mutationFn: (id: number) =>
       apiFetch(`/api/presets/${id}`, { method: 'DELETE' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['presets'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['presets'] });
+      qc.invalidateQueries({ queryKey: ['amitFitProperties'] });
+    },
   });
 }
 
@@ -159,7 +170,10 @@ export function useTogglePreset() {
   return useMutation({
     mutationFn: (id: number) =>
       apiFetch(`/api/presets/${id}/toggle`, { method: 'PATCH' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['presets'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['presets'] });
+      qc.invalidateQueries({ queryKey: ['amitFitProperties'] });
+    },
   });
 }
 
@@ -181,6 +195,7 @@ export function useScanPreset() {
       qc.invalidateQueries({ queryKey: ['presets'] });
       qc.invalidateQueries({ queryKey: ['presetProperties'] });
       qc.invalidateQueries({ queryKey: ['presetStats'] });
+      qc.invalidateQueries({ queryKey: ['amitFitProperties'] });
     },
   });
 }
@@ -215,7 +230,10 @@ export function useUpsertThresholds() {
       method: 'PUT',
       body: JSON.stringify({ thresholds }),
     }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['thresholds'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['thresholds'] });
+      qc.invalidateQueries({ queryKey: ['amitFitProperties'] });
+    },
   });
 }
 
@@ -235,6 +253,9 @@ export function useUpsertFeatureAdjustments() {
       method: 'PUT',
       body: JSON.stringify({ adjustments }),
     }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['featureAdjustments'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['featureAdjustments'] });
+      qc.invalidateQueries({ queryKey: ['amitFitProperties'] });
+    },
   });
 }

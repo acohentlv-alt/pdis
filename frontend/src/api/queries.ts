@@ -73,6 +73,16 @@ export function usePresetProperties(presetId: number | null) {
   });
 }
 
+export function useAmitFitProperties(enabled: boolean) {
+  return useQuery({
+    queryKey: ['amitFitProperties'],
+    queryFn: () => apiFetch<{ total: number; properties: Record<string, unknown>[] }>(
+      '/api/amit-fit/properties?per_page=2000'
+    ),
+    enabled,
+  });
+}
+
 export function usePropertiesByPreset(presetId: number | null) {
   return useQuery({
     queryKey: ['propertiesByPreset', presetId],

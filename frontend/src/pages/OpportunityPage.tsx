@@ -4,10 +4,12 @@ import SummaryBar from '../components/SummaryBar';
 import FilterBar from '../components/FilterBar';
 import PropertyCard from '../components/PropertyCard';
 import PresetManager from '../components/PresetManager';
-import { usePresetProperties, useAllPresets, useFavoriteIds, useWhitelistIds, useBlacklistIds, useScanStatus } from '../api/queries';
+import { usePresetProperties, useAllPresets, useAmitFitProperties, useFavoriteIds, useWhitelistIds, useBlacklistIds, useScanStatus } from '../api/queries';
 import { useAddFavorite, useRemoveFavorite, useWhitelist, useRemoveWhitelist, useBlacklist, useRemoveBlacklist } from '../api/mutations';
 import { matchesPresetCriteria } from '../lib/presetMatch';
 import { signalCount } from '../lib/signalCount';
+
+const AMIT_FIT_ID = -1;
 
 function getPresetSummary(preset: Record<string, unknown>): string {
   const parts: string[] = [];
@@ -162,10 +164,29 @@ export default function OpportunityPage() {
 
   // Data fetching
   const { data: presetsData } = useAllPresets();
-  const allPresets = (presetsData?.presets ?? []) as Record<string, unknown>[];
+  const allPresetsRaw = (presetsData?.presets ?? []) as Record<string, unknown>[];
+  const allPresets = useMemo(
+    () => allPresetsRaw.filter(p => {
+      if (!((p.is_active as boolean) ?? true)) return false;
+      const extra = (p.extra_params as Record<string, unknown> | null) ?? {};
+      const src = extra.source as string | undefined;
+      if (src === 'facebook') return false;
+      return true;
+    }),
+    [allPresetsRaw]
+  );
 
-  const { data: presetPropsData, isLoading } = usePresetProperties(selectedPresetId);
-  const allItems = (presetPropsData?.properties ?? []) as Record<string, unknown>[];
+  const isAmitFit = selectedPresetId === AMIT_FIT_ID;
+  const { data: presetPropsData, isLoading: presetLoading } =
+    usePresetProperties(isAmitFit ? null : selectedPresetId);
+  const { data: amitFitData, isLoading: amitLoading } =
+    useAmitFitProperties(isAmitFit);
+  const isLoading = isAmitFit ? amitLoading : presetLoading;
+  const allItems = (
+    isAmitFit
+      ? (amitFitData?.properties ?? [])
+      : (presetPropsData?.properties ?? [])
+  ) as Record<string, unknown>[];
 
   const { data: favData } = useFavoriteIds();
   const { data: whitelistData } = useWhitelistIds();
@@ -192,9 +213,12 @@ export default function OpportunityPage() {
   const addBlacklist = useBlacklist();
   const removeBlacklist = useRemoveBlacklist();
 
-  // Auto-select first preset if none selected
+  // Auto-select first preset if none selected or selection no longer visible
   useEffect(() => {
-    if (selectedPresetId === null && allPresets.length > 0) {
+    if (allPresets.length === 0) return;
+    if (selectedPresetId === AMIT_FIT_ID) return;
+    const stillVisible = allPresets.some(p => (p.id as number) === selectedPresetId);
+    if (selectedPresetId === null || !stillVisible) {
       const firstId = allPresets[0].id as number;
       setSelectedPresetId(firstId);
       localStorage.setItem('pdis_selected_preset', String(firstId));
@@ -254,7 +278,9 @@ export default function OpportunityPage() {
   );
 
   // Phase 2: split filtered into matching vs other based on preset criteria
-  const selectedPreset = allPresets.find(p => (p.id as number) === selectedPresetId) ?? null;
+  const selectedPreset = isAmitFit
+    ? null
+    : (allPresets.find(p => (p.id as number) === selectedPresetId) ?? null);
 
   const [matchingItems, otherItems] = useMemo(() => {
     if (!selectedPreset) return [filtered, [] as Record<string, unknown>[]];
@@ -338,6 +364,22 @@ export default function OpportunityPage() {
 
         {/* Preset Pills */}
         <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+          <button
+            key="amit-fit"
+            onClick={() => {
+              setSelectedPresetId(AMIT_FIT_ID);
+              localStorage.setItem('pdis_selected_preset', String(AMIT_FIT_ID));
+              setActiveStatFilter(null);
+            }}
+            className={`px-4 py-2 rounded-full whitespace-nowrap shrink-0 border transition-colors text-left ${
+              isAmitFit
+                ? 'bg-emerald-600 text-white border-emerald-600'
+                : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+            }`}
+          >
+            <span className="block text-sm font-medium">Amit Fit</span>
+            <span className="block text-[10px] opacity-70">Across all hoods</span>
+          </button>
           {allPresets.map(p => {
             const id = p.id as number;
             const isSelected = id === selectedPresetId;

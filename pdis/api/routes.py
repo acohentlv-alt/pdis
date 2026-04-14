@@ -21,6 +21,9 @@ from pdis.signals import compute_signals_batch
 logger = structlog.get_logger(__name__)
 router = APIRouter()
 
+FB_OPT_IN_SOURCES = {"yad2_facebook", "madlan_facebook", "all", "facebook"}
+MADLAN_SOURCES = {"madlan", "yad2_madlan", "madlan_facebook", "all", "both"}
+
 
 # ---------------------------------------------------------------------------
 # Health
@@ -143,6 +146,20 @@ async def get_preset_properties(
             )
             city_preset_ids = [r["id"] for r in await cur.fetchall()]
 
+            # If the viewed preset is NOT a FB-opt-in source, exclude any pure-FB preset
+            _preset_extra = preset.get("extra_params") or {}
+            if isinstance(_preset_extra, str):
+                import json as _j
+                _preset_extra = _j.loads(_preset_extra)
+            _viewed_source = _preset_extra.get("source", "yad2")
+            if _viewed_source not in FB_OPT_IN_SOURCES:
+                await cur.execute(
+                    "SELECT id FROM search_presets WHERE extra_params->>'source' = 'facebook' LIMIT 1"
+                )
+                fb_row = await cur.fetchone()
+                if fb_row:
+                    city_preset_ids = [pid for pid in city_preset_ids if pid != fb_row["id"]]
+
             # 3. Build dynamic WHERE clauses
             conditions = [
                 "(p.preset_id = ANY(%s) OR p.preset_id IS NULL)",
@@ -264,12 +281,15 @@ async def create_preset(request: Request):
     city_code = body.get("city_code", "").strip()
     source = body.get("source", "yad2")
 
+    VALID_SOURCES = {"yad2", "madlan", "facebook", "yad2_madlan", "yad2_facebook", "madlan_facebook", "all"}
+    if source not in VALID_SOURCES:
+        raise HTTPException(400, f"Invalid source '{source}'. Valid values: {sorted(VALID_SOURCES)}")
+
     extra_params: dict = {}
-    if source == "madlan":
-        extra_params["source"] = "madlan"
-        extra_params["madlan_city"] = body.get("madlan_city", city_code)
-    elif source == "both":
-        extra_params["source"] = "both"
+    if source != "yad2":
+        extra_params["source"] = source
+    if source in MADLAN_SOURCES:
+        extra_params["madlan_city"] = body.get("madlan_city") or city_code
 
     # Advanced filter params stored in extra_params JSONB
     for key in ["min_sqm", "max_sqm", "min_floor", "max_floor", "enter_date",
@@ -316,12 +336,37 @@ async def update_preset(preset_id: int, request: Request):
     body = await request.json()
 
     source = body.get("source", "yad2")
-    extra_params: dict = {}
-    if source == "madlan":
-        extra_params["source"] = "madlan"
-        extra_params["madlan_city"] = body.get("madlan_city", body.get("city_code", ""))
-    elif source == "both":
-        extra_params["source"] = "both"
+    VALID_SOURCES = {"yad2", "madlan", "facebook", "yad2_madlan", "yad2_facebook", "madlan_facebook", "all"}
+    if source not in VALID_SOURCES:
+        raise HTTPException(400, f"Invalid source '{source}'. Valid values: {sorted(VALID_SOURCES)}")
+
+    # Read existing extra_params from DB to preserve custom seeder keys
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT extra_params FROM search_presets WHERE id = %s", (preset_id,))
+            existing_row = await cur.fetchone()
+    if not existing_row:
+        raise HTTPException(404, "Preset not found")
+    existing_extra = existing_row["extra_params"] or {}
+    if isinstance(existing_extra, str):
+        existing_extra = json.loads(existing_extra)
+
+    # Start from existing extra_params to preserve custom seeder keys
+    extra_params: dict = dict(existing_extra)
+
+    # Pop all known managed keys (will be re-set from new values)
+    for key in ["source", "madlan_city",
+                "min_sqm", "max_sqm", "min_floor", "max_floor", "enter_date",
+                "img_only", "parking", "elevator", "air_conditioning", "balcony",
+                "pets", "furniture", "mamad", "accessible", "property_condition"]:
+        extra_params.pop(key, None)
+
+    # Re-apply new source/madlan_city
+    if source != "yad2":
+        extra_params["source"] = source
+    city_code_for_madlan = body.get("city_code") or ""
+    if source in MADLAN_SOURCES:
+        extra_params["madlan_city"] = body.get("madlan_city") or city_code_for_madlan
 
     # Advanced filter params stored in extra_params JSONB
     for key in ["min_sqm", "max_sqm", "min_floor", "max_floor", "enter_date",
@@ -455,6 +500,77 @@ async def clone_preset(preset_id: int):
             row = await cur.fetchone()
         await conn.commit()
     return dict(row)
+
+
+# ---------------------------------------------------------------------------
+# Amit Fit
+# ---------------------------------------------------------------------------
+
+@router.get("/api/amit-fit/properties")
+async def get_amit_fit_properties(
+    page: int = Query(default=1),
+    per_page: int = Query(default=500),
+):
+    """Return all active properties that have buyer_fit_tags, sorted by amit_pct_vs_preferred ASC."""
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            # Get all active preset IDs (all sources, including FB)
+            await cur.execute("SELECT id FROM search_presets WHERE is_active = TRUE")
+            preset_ids = [r["id"] for r in await cur.fetchall()]
+
+            if not preset_ids:
+                return {"total": 0, "page": page, "per_page": per_page, "properties": []}
+
+            # Count total
+            await cur.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM properties p
+                LEFT JOIN property_classifications pc ON pc.property_id = p.id
+                LEFT JOIN blacklist bl ON bl.property_id = p.id
+                WHERE (p.preset_id = ANY(%s) OR p.preset_id IS NULL)
+                  AND p.is_active = TRUE
+                  AND bl.id IS NULL
+                  AND jsonb_array_length(COALESCE(pc.signal_details->'buyer_fit_tags', '[]'::jsonb)) > 0
+                """,
+                (preset_ids,),
+            )
+            total_row = await cur.fetchone()
+            total = total_row["total"] if total_row else 0
+
+            offset = (page - 1) * per_page
+            await cur.execute(
+                """
+                SELECT p.*, pc.signal_details,
+                    (
+                        SELECT ARRAY_AGG(DISTINCT p2.source)
+                        FROM property_matches pm
+                        JOIN properties p2 ON p2.id = CASE
+                            WHEN pm.property_id_a = p.id THEN pm.property_id_b
+                            ELSE pm.property_id_a END
+                        WHERE pm.property_id_a = p.id OR pm.property_id_b = p.id
+                    ) AS matched_sources
+                FROM properties p
+                LEFT JOIN property_classifications pc ON pc.property_id = p.id
+                LEFT JOIN blacklist bl ON bl.property_id = p.id
+                WHERE (p.preset_id = ANY(%s) OR p.preset_id IS NULL)
+                  AND p.is_active = TRUE
+                  AND bl.id IS NULL
+                  AND jsonb_array_length(COALESCE(pc.signal_details->'buyer_fit_tags', '[]'::jsonb)) > 0
+                ORDER BY (pc.signal_details->>'amit_pct_vs_preferred')::float ASC NULLS LAST,
+                         p.updated_at DESC
+                LIMIT %s OFFSET %s
+                """,
+                (preset_ids, per_page, offset),
+            )
+            rows = await cur.fetchall()
+
+    return {
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "properties": [dict(r) for r in rows],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1552,6 +1668,66 @@ async def upsert_operator_input(yad2_id: str, body: OperatorInputBody):
 # Neighborhood Thresholds (Amit Fit)
 # ---------------------------------------------------------------------------
 
+async def _recompute_amit_fit_for_scope(
+    scopes: list[tuple[int | None, str | None, str]],
+) -> tuple[int | None, str | None]:
+    """Best-effort Amit Fit recompute for properties matching (hood_id, neighborhood, category) scopes.
+    Returns (count, warning). On success: (N, None). On failure: (None, error_string)."""
+    unique_scopes = list({
+        (hood_id, (name or "").strip() or None, cat)
+        for hood_id, name, cat in scopes
+    })
+    if not unique_scopes:
+        return 0, None
+
+    or_clauses = []
+    params: list = []
+    for hood_id, name, cat in unique_scopes:
+        if hood_id is not None:
+            or_clauses.append("(hood_id = %s AND category = %s)")
+            params.extend([hood_id, cat])
+        if name:
+            or_clauses.append("(TRIM(neighborhood) = %s AND category = %s)")
+            params.extend([name, cat])
+
+    if not or_clauses:
+        return 0, None
+
+    sql = (
+        "SELECT id FROM properties WHERE is_active = TRUE AND ("
+        + " OR ".join(or_clauses)
+        + ")"
+    )
+
+    try:
+        async with _db.pool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(sql, params)
+                rows = await cur.fetchall()
+
+        property_ids = [r["id"] for r in rows]
+        if not property_ids:
+            logger.info("amit_fit.recompute.empty_scope", scopes=unique_scopes)
+            return 0, None
+
+        from pdis.scanner import get_scan_status
+        if get_scan_status().get("running"):
+            logger.info(
+                "amit_fit.recompute.scan_in_progress",
+                count=len(property_ids),
+                note="idempotent — proceeding anyway",
+            )
+
+        from pdis.classification import persist_signals_batch
+        await persist_signals_batch(property_ids)
+        logger.info("amit_fit.recompute.done", count=len(property_ids), scopes=unique_scopes)
+        return len(property_ids), None
+
+    except Exception as exc:
+        logger.warning("amit_fit.recompute_failed", error=str(exc), scopes=unique_scopes)
+        return None, str(exc)
+
+
 @router.get("/api/thresholds")
 async def list_thresholds(neighborhood: str | None = None, category: str = "forsale"):
     async with _db.pool.connection() as conn:
@@ -1618,19 +1794,37 @@ async def upsert_thresholds(request: Request):
                     ),
                 )
         await conn.commit()
-    return {"ok": True, "count": len(rows_in)}
+    scopes = [
+        (t.get("hood_id"), t["neighborhood"].strip(), t.get("category", "forsale"))
+        for t in rows_in
+    ]
+    recomputed, warning = await _recompute_amit_fit_for_scope(scopes)
+    response = {"ok": True, "count": len(rows_in), "recomputed": recomputed}
+    if warning:
+        response["recompute_warning"] = warning
+    return response
 
 
 @router.delete("/api/thresholds/{threshold_id}")
 async def delete_threshold(threshold_id: int):
     async with _db.pool.connection() as conn:
-        async with conn.cursor() as cur:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                "SELECT hood_id, neighborhood, category FROM neighborhood_thresholds WHERE id = %s",
+                (threshold_id,),
+            )
+            row = await cur.fetchone()
+            if not row:
+                raise HTTPException(404, "threshold not found")
             await cur.execute("DELETE FROM neighborhood_thresholds WHERE id = %s", (threshold_id,))
-            deleted = cur.rowcount
         await conn.commit()
-    if deleted == 0:
-        raise HTTPException(404, "threshold not found")
-    return {"ok": True}
+
+    scopes = [(row["hood_id"], row["neighborhood"], row["category"])]
+    recomputed, warning = await _recompute_amit_fit_for_scope(scopes)
+    response = {"ok": True, "recomputed": recomputed}
+    if warning:
+        response["recompute_warning"] = warning
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -1723,19 +1917,37 @@ async def upsert_feature_adjustments(request: Request):
                     ),
                 )
         await conn.commit()
-    return {"ok": True, "count": len(rows_in)}
+    scopes = [
+        (t.get("hood_id"), t["neighborhood"].strip(), t.get("category", "forsale"))
+        for t in rows_in
+    ]
+    recomputed, warning = await _recompute_amit_fit_for_scope(scopes)
+    response = {"ok": True, "count": len(rows_in), "recomputed": recomputed}
+    if warning:
+        response["recompute_warning"] = warning
+    return response
 
 
 @router.delete("/api/feature-adjustments/{fa_id}")
 async def delete_feature_adjustment(fa_id: int):
     async with _db.pool.connection() as conn:
-        async with conn.cursor() as cur:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                "SELECT hood_id, neighborhood, category FROM neighborhood_feature_adjustments WHERE id = %s",
+                (fa_id,),
+            )
+            row = await cur.fetchone()
+            if not row:
+                raise HTTPException(404, "feature adjustment not found")
             await cur.execute("DELETE FROM neighborhood_feature_adjustments WHERE id = %s", (fa_id,))
-            deleted = cur.rowcount
         await conn.commit()
-    if deleted == 0:
-        raise HTTPException(404, "feature adjustment not found")
-    return {"ok": True}
+
+    scopes = [(row["hood_id"], row["neighborhood"], row["category"])]
+    recomputed, warning = await _recompute_amit_fit_for_scope(scopes)
+    response = {"ok": True, "recomputed": recomputed}
+    if warning:
+        response["recompute_warning"] = warning
+    return response
 
 
 # ---------------------------------------------------------------------------

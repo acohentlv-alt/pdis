@@ -14,6 +14,7 @@ import pdis.database as _db
 from pdis.models import ScrapedListing, ScrapeResult
 from pdis.scraper import scrape_preset, fetch_item_detail
 from pdis.scraper_madlan import scrape_madlan_preset
+from pdis.config import settings
 
 logger = structlog.get_logger(__name__)
 log = logger
@@ -459,14 +460,32 @@ async def run_scan(preset_id: int) -> dict:
     match_count = 0
     relist_count = 0
 
-    try:
-        # Detect source from preset extra_params
-        _extra = preset.get("extra_params") or {}
-        if isinstance(_extra, str):
-            import json as _json
-            _extra = _json.loads(_extra)
-        _source = _extra.get("source", "yad2")
+    # Hoist source detection BEFORE try so VM-skip can return without entering finally
+    _extra = preset.get("extra_params") or {}
+    if isinstance(_extra, str):
+        import json as _json
+        _extra = _json.loads(_extra)
+    _source = _extra.get("source", "yad2")
 
+    # VM-skip: forsale yad2 scraping is routed through Oracle VM when flag is set
+    if (
+        preset["category"] == "forsale"
+        and _source == "yad2"
+        and getattr(settings, "yad2_vm_ingestion_enabled", False)
+    ):
+        log.info("scanner.yad2_forsale_skipped_vm", preset_id=preset_id, preset_name=preset["name"])
+        await _finish_session(session_id, result, new_count,
+                              status="skipped_vm",
+                              error_message="Yad2 forsale scraping routed through Oracle VM")
+        return {
+            "session_id": session_id, "preset_id": preset_id,
+            "preset_name": preset["name"], "status": "skipped_vm",
+            "listings_found": 0, "new_listings": 0, "pages_scraped": 0,
+            "duration_seconds": 0.0, "was_blocked": False, "errors": [],
+            "events_detected": 0, "matches_found": 0, "customer_relistings": 0,
+        }
+
+    try:
         if _source == "madlan":
             result = await scrape_madlan_preset(dict(preset))
         else:

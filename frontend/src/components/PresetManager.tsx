@@ -167,9 +167,13 @@ function formToPayload(form: PresetFormData): Record<string, unknown> {
 
 function presetToForm(preset: Record<string, unknown>): PresetFormData {
   const extra = (preset.extra_params ?? {}) as Record<string, unknown>;
-  let source = 'yad2';
-  if (extra.source === 'madlan') source = 'madlan';
-  else if (extra.source === 'both') source = 'both';
+  const VALID_SOURCES = new Set([
+    'yad2', 'madlan', 'facebook',
+    'yad2_madlan', 'yad2_facebook', 'madlan_facebook', 'all',
+  ]);
+  const rawSrc = extra.source as string | undefined;
+  const normalized = rawSrc === 'both' ? 'yad2_madlan' : rawSrc;
+  const source = normalized && VALID_SOURCES.has(normalized) ? normalized : 'yad2';
 
   return {
     name: (preset.name as string) ?? '',
@@ -222,9 +226,17 @@ function formatRoomsRange(min: unknown, max: unknown): string {
 
 function sourceLabel(preset: Record<string, unknown>): string {
   const extra = (preset.extra_params ?? {}) as Record<string, unknown>;
-  if (extra.source === 'madlan') return 'Madlan';
-  if (extra.source === 'both') return 'Yad2 + Madlan';
-  return 'Yad2';
+  const src = extra.source as string | undefined;
+  switch (src) {
+    case 'madlan': return 'Madlan';
+    case 'facebook': return 'Facebook';
+    case 'both': return 'Yad2 + Madlan';
+    case 'yad2_madlan': return 'Yad2 + Madlan';
+    case 'yad2_facebook': return 'Yad2 + Facebook';
+    case 'madlan_facebook': return 'Madlan + Facebook';
+    case 'all': return 'Yad2 + Madlan + Facebook';
+    default: return 'Yad2';
+  }
 }
 
 export default function PresetManager({ open, onClose, category }: PresetManagerProps) {
@@ -527,7 +539,11 @@ export default function PresetManager({ open, onClose, category }: PresetManager
             <select className={inputCls} value={form.source} onChange={e => setField('source', e.target.value)}>
               <option value="yad2">Yad2</option>
               <option value="madlan">Madlan</option>
-              <option value="both">Both</option>
+              <option value="facebook">Facebook</option>
+              <option value="yad2_madlan">Yad2 + Madlan</option>
+              <option value="yad2_facebook">Yad2 + Facebook</option>
+              <option value="madlan_facebook">Madlan + Facebook</option>
+              <option value="all">Yad2 + Madlan + Facebook</option>
             </select>
           </div>
           {!category && (
@@ -546,7 +562,7 @@ export default function PresetManager({ open, onClose, category }: PresetManager
           <input className={inputCls} value={form.city_code} onChange={e => setField('city_code', e.target.value)} placeholder="e.g. 5000" />
         </div>
 
-        {form.source === 'madlan' && (
+        {(['madlan', 'yad2_madlan', 'madlan_facebook', 'all', 'both'].includes(form.source)) && (
           <div>
             <label className={labelCls}>Madlan city (if different)</label>
             <input className={inputCls} value={form.madlan_city} onChange={e => setField('madlan_city', e.target.value)} placeholder="Leave blank to use city code" />
