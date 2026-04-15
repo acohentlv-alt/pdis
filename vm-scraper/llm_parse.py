@@ -26,6 +26,8 @@ Return ONLY a JSON object with these fields (null if not in text — NEVER inven
 - sqm: integer square meters or null
 - rooms: float (half-rooms allowed: 2.5, 3.5) or null
 - phone: string (Israeli mobile, digits only, e.g. "0521234567") or null
+- street_address: Hebrew street name without house number (e.g. "אבן גבירול", "דיזנגוף") or null
+- house_number: integer or null
 - neighborhood: one of these Hebrew canonical names, or null:
   פלורנטין, נווה צדק, כרם התימנים, לב תל אביב, הצפון הישן, הצפון החדש,
   יפו העתיקה, יפו, שפירא, שבזי, נווה אביבים, רמת אביב, תל ברוך, חובבי ציון,

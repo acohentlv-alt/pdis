@@ -257,13 +257,29 @@ def main() -> None:
     print(f"Regex extraction: {before}", flush=True)
 
     if _LLM_ENABLED:
+        # Fetch already-known fb_* yad2_ids so we can skip LLM on dupes (cost saver)
+        known_ids: set[str] = set()
+        try:
+            with httpx.Client(timeout=30) as client:
+                kr = client.get(f"{PDIS_API_URL}/api/ingest/facebook/existing-ids")
+                kr.raise_for_status()
+                known_ids = set(kr.json().get("ids", []))
+            print(f"Known fb_* yad2_ids: {len(known_ids)} (will skip LLM for these)", flush=True)
+        except Exception as exc:
+            print(f"WARN: could not fetch known IDs ({exc}); LLM will parse all posts", flush=True)
+
         limit = int(os.environ.get("LLM_LIMIT", str(len(posts))))
-        print(f"Running LLM parse on {min(limit, len(posts))} posts...", flush=True)
+        print(f"Running LLM parse on up to {min(limit, len(posts))} posts...", flush=True)
         usage_stats: list[dict] = []
         llm_errors = 0
+        llm_skipped = 0
         for i, p in enumerate(posts[:limit]):
             if i % 25 == 0 and i > 0:
-                print(f"  [{i}/{limit}] llm_errors={llm_errors}", flush=True)
+                print(f"  [{i}/{limit}] llm_errors={llm_errors} skipped_known={llm_skipped}", flush=True)
+            yad2_id = f"fb_{p['post_id']}"
+            if yad2_id in known_ids:
+                llm_skipped += 1
+                continue
             result = llm_parse_post(_llm_client, p["description"], p["author_name"])
             if result.get("_error"):
                 llm_errors += 1
@@ -281,10 +297,18 @@ def main() -> None:
                 p["contact_phone"] = re.sub(r"\D", "", str(result["phone"])) or None
             if result.get("neighborhood"):
                 p["neighborhood"] = result["neighborhood"]
+            if result.get("street_address"):
+                p["address_street"] = str(result["street_address"]).strip()
+            if result.get("house_number") is not None:
+                try:
+                    p["address_home_number"] = int(result["house_number"])
+                except (TypeError, ValueError):
+                    pass
         cost = llm_estimate_cost(usage_stats)
+        attempted = min(limit, len(posts)) - llm_skipped
         print(
-            f"LLM done: errors={llm_errors}/{min(limit, len(posts))} "
-            f"in_tokens={cost['in']:,} out_tokens={cost['out']:,} "
+            f"LLM done: parsed={attempted - llm_errors} skipped_known={llm_skipped} "
+            f"errors={llm_errors} in_tokens={cost['in']:,} out_tokens={cost['out']:,} "
             f"cache_read={cost['cache_read']:,} cache_write={cost['cache_write']:,} "
             f"cost=${cost['usd']:.4f}",
             flush=True,

@@ -2077,6 +2077,8 @@ class FacebookPost(BaseModel):
     square_meters: int | None = None
     neighborhood: str | None = None
     address_city: str | None = None
+    address_street: str | None = None
+    address_home_number: int | None = None
     image_urls: list[str] = []
     like_count: int | None = None
     listing_url: str
@@ -2136,7 +2138,8 @@ async def _fb_post_to_listing(post: FacebookPost) -> ScrapedListing | None:
         yad2_id=f"fb_{post.post_id}",
         source="facebook",
         category="rent",
-        address_street=None,
+        address_street=post.address_street,
+        address_home_number=str(post.address_home_number) if post.address_home_number is not None else None,
         address_city=address_city,
         neighborhood=post.neighborhood,
         rooms=post.rooms,
@@ -2157,6 +2160,18 @@ async def _fb_post_to_listing(post: FacebookPost) -> ScrapedListing | None:
         group_url=post.group_url,
         like_count=post.like_count,
     )
+
+
+@router.get("/api/ingest/facebook/existing-ids")
+async def fb_existing_ids():
+    """Return list of fb_* yad2_ids currently in DB. Used by the daily Apify
+    orchestrator to skip LLM parsing on posts we've already seen.
+    Unauthed — only returns IDs, no PII."""
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT yad2_id FROM properties WHERE yad2_id LIKE 'fb_%%'")
+            rows = await cur.fetchall()
+    return {"ids": [r["yad2_id"] for r in rows]}
 
 
 @router.get("/api/ingest/facebook/health")
