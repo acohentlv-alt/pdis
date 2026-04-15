@@ -183,6 +183,11 @@ async def get_preset_properties(
             ]
             params: list = [city_preset_ids, preset["category"]]
 
+            # When the viewed preset IS FB-source, narrow results to FB-source only.
+            # Otherwise the city-scoped query bleeds in Yad2/Madlan rows.
+            if _viewed_source == "facebook":
+                conditions.append("p.source = 'facebook'")
+
             if preset.get("min_price") is not None:
                 conditions.append("p.price >= %s")
                 params.append(preset["min_price"])
