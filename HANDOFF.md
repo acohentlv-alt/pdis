@@ -89,3 +89,47 @@ Nothing shipped. Nothing to test. Restart of the workflow is `/plan` → `/revie
 | Govmap backfill | ❓ status unknown | check tmux session `govmap` on VM |
 | Scan UX progress bar | ⏳ uncommitted code | 10 files in working tree, not pushed |
 | `normalize_city()` helper | ❌ not built | A2 brief covers it for FB path only |
+
+---
+
+## LATE APR 15 SESSION — Govmap Option 2 + bug fixes + FB parked
+
+Latest commit: **`a1e9fa8`** pushed to main.
+
+### What we did today
+
+1. **FB Groups scraper PARKED** — investigated with playwright, `mbasic.facebook.com` is deprecated (FB redirects to `www.facebook.com` React app with obfuscated classes that rotate weekly). 4kirot does it via paid residential proxies + ongoing engineering — breaks Alan's free-forever rule. Laptop daemon + queue + UI button + Ollama/Gemma 4 parsing + 14-group curated catalog are all SHIPPED but idle (daemon unloaded from launchd). When Alan relaxes the free constraint (Smartproxy ~$7/mo), 80% of the work is already done. Full parked entry in TASKS.md.
+2. **Govmap Option 2 (Amit-approved) shipped** — removed median-based `below_closed_comps` + `above_closed_comps_20pct` signals. PropertyDetailPage now only shows raw "Recent sales in this building" panel at building-level. Street/neighborhood tiers hidden (Amit called them "averages").
+3. **Govmap 2-bug double fix** — `run_govmap.py` had wrong CRS (EPSG:2039 declared vs actual EPSG:3857 Web Mercator) causing all 17,717 centroids to be in Arctic Ocean. Also scraper read `dealArea` but govmap returns `assetArea`, so `sqm` never populated → `price_per_sqm` (generated col) was NULL on 17,715 rows. Both fixed in scraper + `scripts/backfill_closed_transactions.py` repaired all existing rows.
+4. **₪/m² math fix** on PropertyCard — was using build area, now uses total (gross) area per Israeli RE convention.
+5. **Pydantic `extra=ignore`** — local daemon env vars (`OLLAMA_*`) no longer crash server Settings() parsing.
+6. **Haifa preset 9 deactivated** — had zero filters → was being blocked by Yad2 every run.
+7. **Catalog curation** — 35 non-real-estate FB groups deactivated, 14 keepers active.
+
+### What's half-done
+
+- **Govmap coverage is Bat Yam only** (117 of 2,567 properties = 4.5%). TLV + Haifa = 0%. Existing 17,715 rows are now correct data-wise but geographically limited. Tomorrow's job: check VM tmux `govmap` session status, ship fixed `run_govmap.py` there, resume backfill. Or run locally on MacBook.
+- **Amit Fit** — Alan asked for (a) rent/buy toggle on dashboard and (b) hard 30% cap on preferred (non-negotiable). Two readings still pending: display-time filter vs auto-derive `max = pref × 1.30`. Alan to pick. Also: only Florentin has thresholds seeded, rest of TLV empty. Rent thresholds are 40-50% below market → almost nothing qualifies.
+- **FB daemon/scheduler** unloaded from launchd but plist files still exist. To re-enable: `launchctl load ~/Library/LaunchAgents/com.pdis.fb-daemon.plist` (same for scheduler).
+
+### What to do next
+
+1. **Check VM govmap backfill status** — `ssh -i ~/.ssh/oracle_vm ubuntu@129.159.158.214 "tmux list-sessions; tail -20 /tmp/govmap_full.log"`. If stopped, scp fixed `run_govmap.py` + resume with `--resume`.
+2. **Flip `FB_INGESTION_ENABLED=false` on Render** (cleaner state since FB is parked).
+3. Verify deploy of `a1e9fa8` is green; spot-check one Bat Yam property's PropertyDetailPage — should show "Recent sales in this building" if ≥3 nearby comps.
+4. Amit Fit — get Alan to pick interpretation (a) or (b) for the 30% cap, then ship.
+
+### Watch out for
+
+- **TASKS.md is dated "April 16, 2026"** — one day ahead. An earlier end-session rolled it forward prematurely. Today's real archive is `TASKS_2026-04-15.md`.
+- **3 Render env vars to verify** — `INGEST_SECRET`, `CRON_SECRET` (Alan's value = "shechter"), `FB_INGESTION_ENABLED` (should be `false` now).
+- **Ollama on laptop** — `gemma4:e2b` (~7GB) and `gemma4:e4b` (~9.6GB) both installed. Warm inference ~3s, cold start ~50s. Currently idle.
+- **CLAUDE.md still references removed signals** (`below_closed_comps`, `above_closed_comps_20pct`) at lines 188, 189, 288. Doc cleanup pending.
+
+### Test these
+
+Things shipped today but not eyeballed in deployed UI:
+- PropertyCard ₪/m² — open any property with both build + total sqm, confirm ₪/m² uses total
+- PropertyDetailPage → "Recent sales in this building" panel — only shows for Bat Yam properties with ≥3 comps
+- Preset editor on FB preset — no more multi-select checkbox list (confirmed during session)
+- Preset form Name field typing — no longer loses focus per letter (fixed earlier today)
