@@ -51,16 +51,30 @@ After A2 ships and the canonical is proven stable, extend the normalizer to:
 - Any route that filters `properties.address_city` by string equality
 Goal: one canonical value per city across all sources.
 
-### Govmap full backfill completion + monthly cron
-Still running in tmux session `govmap` on VM. Check status:
+### Govmap full backfill — re-run with fixed scraper to cover full TLV + Haifa
+
+**State (Apr 16):** Old scraper had 2 data bugs just fixed in commit-pending. Backfill script `scripts/backfill_closed_transactions.py` already repaired existing 17,715 rows (sqm + price_per_sqm + centroid_lat/lng all populated from raw_data). But existing coverage is **Bat Yam only** — 117 of 2,567 properties (4.5%). TLV, Ramat Gan, Haifa = 0% coverage.
+
+**Bugs that were fixed in `vm-scraper/run_govmap.py`:**
+1. Transformer declared `EPSG:2039 → 4326` but grid uses EPSG:3857 (Web Mercator). Changed to correct CRS.
+2. `sqm` read from `dealArea` — govmap actually returns `assetArea`. Added to fallback chain (same for `rooms` → `assetRoomNum`).
+
+**Steps to cover rest of the market:**
+1. Check if the VM's tmux `govmap` session is still running:
+   ```
+   ssh -i ~/.ssh/oracle_vm ubuntu@129.159.158.214 "tmux list-sessions; tail -20 /tmp/govmap_full.log"
+   ```
+2. If stopped: scp the fixed `vm-scraper/run_govmap.py` to the VM and resume with `--resume` flag
+3. If running: kill + restart with fixed code (old code was producing broken rows that backfill already fixed)
+4. Monitor progress: `tail -f /tmp/govmap_full.log`
+5. When complete, verify: `SELECT COUNT(*) FROM closed_transactions` (expect 100k-1M)
+6. Install monthly cron (exact block in `TASKS_2026-04-14.md`)
+
+**Alternative (faster, no VM dep):** run locally on MacBook:
 ```
-ssh -i ~/.ssh/oracle_vm ubuntu@129.159.158.214 "tail -5 /tmp/govmap_full.log"
+cd ~/pdis/vm-scraper && python3 run_govmap.py --resume
 ```
-When complete, verify:
-```sql
-SELECT COUNT(*) FROM closed_transactions;  -- expect 500k-1M
-```
-Then install monthly cron (exact block in `TASKS_2026-04-14.md`).
+Expected runtime: several hours at REQ_DELAY=1.0s per polygon.
 
 ---
 
@@ -116,6 +130,12 @@ First card shows `4,299,999 ₪ · 82m² (95 total) · 52,439 ₪/m²`. The ₪/
 
 ### Govmap comps rework — Option 2 (Amit-approved)
 Planned but not coded. Remove `below_closed_comps` / `above_closed_comps_20pct` averages-based signals. Replace with raw list of last 3-5 closed sales in same building on PropertyDetailPage. Amit explicitly said he doesn't want neighborhood averages — just real comparable deals. See Apr 14 conversation for full scoping.
+
+### Amit Fit — add rent/buy toggle + expand threshold coverage
+1. **Toggle UI** — Amit Fit dashboard currently shows a mixed stream. Add explicit toggle: "Buying opportunities" vs "Rental opportunities" (Shechter's current view is mostly buy because thresholds are seeded for buy; rent has 93 candidates in Florentin but most miss Amit's aggressive rent targets).
+2. **Threshold coverage gap** — only פלורנטין (hood_id=205) has thresholds seeded. Expand admin UI seeding for more neighborhoods OR scope Amit Fit explicitly to Florentin-only until more are seeded.
+3. **Threshold realism audit (rent)** — Florentin rent pref=₪47-71/m²/mo vs market avg ₪120/m²/mo. Amit's rent targets are 40-50% below market → virtually nothing qualifies. Alan to decide: raise targets, or explicit "deals only" framing.
+4. **Hard 30% cap (non-negotiable)** — Alan wants to lock Amit Fit such that any property >30% above preferred target gets NO tag, regardless of the per-bucket `max` column. Two readings pending: (a) display-time filter (keep admin columns, enforce cap at signal time) or (b) auto-derive `max = pref × 1.30` (make max a computed field). Alan to pick before implementation.
 
 ### Phone numbers — still broken
 - Madlan: scraper reads `poc.displayNumber` but 0/713 properties get one. Broken or API changed.

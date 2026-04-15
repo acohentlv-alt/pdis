@@ -348,32 +348,14 @@ export default function PropertyDetailPage() {
         );
       })()}
 
-      {/* Closed Comps */}
-      {compsData && compsData.count > 0 && (
-        <Section title="Closed Comps">
+      {/* Closed Comps — same-building only, raw deals (Amit: no averages) */}
+      {compsData && compsData.count > 0 && compsData.source_level === 'building' && (
+        <Section title="Recent sales in this building">
           <div className="text-sm text-gray-700 space-y-1">
-            <div>{compsData.count} closed sales in this {compsData.source_level} — last 24 months</div>
-            {compsData.median_pps && (
-              <>
-                <div><span className="text-gray-500">Median:</span> ₪{compsData.median_pps.toLocaleString()}/m²</div>
-                {price && sqm && (
-                  <div>
-                    <span className="text-gray-500">This listing:</span> ₪{Math.round(price / sqm).toLocaleString()}/m²
-                    {(() => {
-                      const deltaPct = ((price / sqm) - compsData.median_pps) / compsData.median_pps * 100;
-                      return (
-                        <span className={deltaPct <= 0 ? 'text-green-700 ml-2' : 'text-red-700 ml-2'}>
-                          {deltaPct > 0 ? '+' : ''}{deltaPct.toFixed(1)}%
-                        </span>
-                      );
-                    })()}
-                  </div>
-                )}
-              </>
-            )}
-            <div className="border-t pt-2 mt-2 space-y-1">
+            <div className="text-xs text-gray-500">{compsData.count} closed sales — last 24 months</div>
+            <div className="space-y-1 pt-1">
               {compsData.deals.slice(0, 5).map(d => (
-                <div key={d.deal_id} className="text-xs text-gray-500 flex justify-between gap-2">
+                <div key={d.deal_id} className="text-xs text-gray-600 flex justify-between gap-2">
                   <span>{new Date(d.deal_date).toLocaleDateString('en-GB')}</span>
                   <span>{d.sqm ? `${d.sqm}m²` : '—'}</span>
                   <span>{d.floor != null ? `fl ${d.floor}` : '—'}</span>
@@ -383,7 +365,7 @@ export default function PropertyDetailPage() {
               ))}
             </div>
             <div className="text-[10px] text-gray-400 pt-2 border-t">
-              Closed-sale data: Israel Tax Authority (govmap.gov.il)
+              Source: Israel Tax Authority (govmap.gov.il)
             </div>
           </div>
         </Section>

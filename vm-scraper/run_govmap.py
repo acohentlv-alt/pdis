@@ -63,9 +63,9 @@ PDIS_API_URL = os.environ.get("PDIS_API_URL", "https://pdis-lsah.onrender.com").
 
 GOVMAP_BASE = "https://www.govmap.gov.il/api/real-estate"
 
-# TLV grid in EPSG:2039 (Israel Transverse Mercator)
-# x: easting range for Tel Aviv
-# y: northing range for Tel Aviv
+# TLV grid in EPSG:3857 (Web Mercator) — govmap's native map projection.
+# x: easting range for Tel Aviv (~34.77°E)
+# y: northing range for Tel Aviv (~32.06°N)
 GRID_X_MIN = 3865000
 GRID_X_MAX = 3880000
 GRID_Y_MIN = 3765000
@@ -77,18 +77,18 @@ REQ_DELAY = 1.0        # seconds between govmap requests
 MAX_CONSECUTIVE_FAILURES = 3
 RETRY_DELAYS = [5, 15, 30]  # seconds for 5xx retries
 
-# EPSG:2039 → EPSG:4326 transformer (always_xy=True: x=lng, y=lat)
-_itm_to_wgs = Transformer.from_crs("EPSG:2039", "EPSG:4326", always_xy=True)
+# EPSG:3857 → EPSG:4326 transformer (always_xy=True: x=lng, y=lat)
+_itm_to_wgs = Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True)
 
 
 # ---------------------------------------------------------------------------
 # Coordinate helpers
 # ---------------------------------------------------------------------------
 
-def itm_to_wgs(x_itm: float, y_itm: float) -> tuple[float, float]:
-    """Convert Israel Transverse Mercator to WGS-84 (lng, lat)."""
-    lng, lat = _itm_to_wgs.transform(x_itm, y_itm)
-    return lat, lng  # return as (lat, lng)
+def itm_to_wgs(x_merc: float, y_merc: float) -> tuple[float, float]:
+    """Convert Web Mercator (EPSG:3857) to WGS-84 (returns lat, lng)."""
+    lng, lat = _itm_to_wgs.transform(x_merc, y_merc)
+    return lat, lng
 
 
 def _haversine_m(lat1, lng1, lat2, lng2) -> float:
@@ -165,7 +165,7 @@ def get_deals_for_polygon(polygon_id: str, session) -> list[dict]:
 def parse_deal(raw: dict, polygon_id: str) -> dict | None:
     """
     Parse a raw govmap deal dict into the GovmapDeal schema.
-    Govmap centroid coordinates are in EPSG:2039 — must be projected to WGS-84.
+    Govmap centroid coordinates are in EPSG:3857 (Web Mercator) — must be projected to WGS-84.
     """
     deal_id = raw.get("dealId") or raw.get("deal_id") or raw.get("id")
     if not deal_id:
@@ -204,7 +204,7 @@ def parse_deal(raw: dict, polygon_id: str) -> dict | None:
         return None
 
     # sqm
-    sqm = raw.get("dealArea") or raw.get("sqm") or raw.get("area")
+    sqm = raw.get("assetArea") or raw.get("dealArea") or raw.get("sqm") or raw.get("area")
     try:
         sqm = int(sqm) if sqm is not None else None
     except (TypeError, ValueError):
@@ -263,7 +263,7 @@ def parse_deal(raw: dict, polygon_id: str) -> dict | None:
     except (TypeError, ValueError):
         floor = None
 
-    rooms = raw.get("rooms") or raw.get("roomsNum")
+    rooms = raw.get("assetRoomNum") or raw.get("rooms") or raw.get("roomsNum")
     try:
         rooms = float(rooms) if rooms is not None else None
     except (TypeError, ValueError):

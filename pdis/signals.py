@@ -322,21 +322,10 @@ def _compute_single(
     if details["below_avg_price_sqm"]:
         strong_signals.append("below_avg_price")
 
-    # Closed-sale comps signals (orthogonal to Amit Fit)
-    if comps and comps.get("count", 0) > 0 and comps.get("median_pps"):
-        median = comps["median_pps"]
-        listing_pps = price / sqm if sqm > 0 else None
-        if listing_pps:
-            pct = (listing_pps - median) / median
-            details["closed_comp_median_pps"] = median
-            details["closed_comp_count"] = comps["count"]
-            details["closed_comp_source"] = comps["source_level"]
-            details["closed_comp_pct_vs_median"] = round(pct, 3)
-            details["closed_comp_listing_pps"] = round(listing_pps, 1)
-            if pct <= -0.20:
-                strong_signals.append("below_closed_comps")
-            elif pct >= 0.20:
-                strong_signals.append("above_closed_comps_20pct")
+    # Closed-sale comps details (Amit: raw deals only, no average-based signals)
+    if comps and comps.get("count", 0) > 0:
+        details["closed_comp_count"] = comps["count"]
+        details["closed_comp_source"] = comps["source_level"]
 
     # WEAK signals
     if details["price_drops"] > 0 and "price_drop_gt_10pct" not in strong_signals:

@@ -121,24 +121,14 @@ async def compute_building_comps_batch(property_ids: list[int]) -> dict[int, dic
 
 
 async def compute_closed_comp_signals(property_id: int, price: int | None, sqm: int | None) -> tuple[list[str], dict]:
+    """Per Amit: no average-based signals — return raw comp metadata only."""
     if not price or not sqm or sqm <= 0:
         return [], {}
     comps = await compute_building_comps(property_id)
-    if comps["count"] == 0 or not comps["median_pps"]:
+    if comps["count"] == 0:
         return [], {}
-    listing_pps = price / sqm
-    median = comps["median_pps"]
-    pct = (listing_pps - median) / median
     details = {
-        "closed_comp_median_pps": median,
         "closed_comp_count": comps["count"],
         "closed_comp_source": comps["source_level"],
-        "closed_comp_pct_vs_median": round(pct, 3),
-        "closed_comp_listing_pps": round(listing_pps, 1),
     }
-    tags = []
-    if pct <= -0.20:
-        tags.append("below_closed_comps")
-    elif pct >= 0.20:
-        tags.append("above_closed_comps_20pct")
-    return tags, details
+    return [], details
