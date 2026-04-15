@@ -2047,14 +2047,13 @@ async def delete_feature_adjustment(fa_id: int):
 
 # ---------------------------------------------------------------------------
 # Facebook ingestion
-# IMPORTANT: /api/ingest/facebook/health and /api/ingest/facebook/log-reveal
-# must be registered BEFORE any path-param routes to avoid capture issues.
+# IMPORTANT: /api/ingest/facebook/health must be registered BEFORE any
+# path-param routes to avoid capture issues.
 # ---------------------------------------------------------------------------
 
-# City string used as default address_city for all FB posts.
-# TODO: verify "תל אביב-יפו" matches the exact string in prod DB before flipping
-# FB_INGESTION_ENABLED=true (Step 0a deferred).
-TLV_CITY_STRING = "תל אביב-יפו"
+# Canonical TLV address_city — matches existing properties.address_city values in prod.
+# Verified 2026-04-15: all 2,175 TLV rows use this spacing (space, no hyphen).
+TLV_CITY_STRING = "תל אביב יפו"
 
 GROUP_CITY_MAP = {
     "458499457501175": TLV_CITY_STRING,
@@ -2184,9 +2183,9 @@ async def fb_ingest_health():
     }
 
 
-@router.post("/api/ingest/facebook/log-reveal")
-async def fb_log_reveal(body: LogRevealBody):
-    """Log a phone reveal event for a FB property. Unauthed."""
+@router.post("/api/log-reveal")
+async def log_reveal(body: LogRevealBody):
+    """Log a phone reveal event for any property. Unauthed."""
     async with _db.pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
