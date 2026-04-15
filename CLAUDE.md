@@ -1,5 +1,5 @@
 # PDIS — Claude Code Operating Guide
-*Last updated: April 15, 2026*
+*Last updated: April 15, 2026 (govmap signals removed, FB Apify pipeline live)*
 
 ---
 
@@ -98,12 +98,16 @@ Token reuses `gh auth token` (scopes: `repo, gist, read:org, workflow`). If it s
 - Less structured than Yad2 but provides cross-source validation
 
 ### Facebook Groups (active)
-- Playwright scraper on Oracle VM (`vm-scraper/run.py`) — real browser session, reuses Alan's FB cookies (`vm-scraper/fb_state.json`)
-- Scrapes Tel Aviv rental groups; catalog in `fb_groups` table (49 groups seeded)
-- POSTs to Render at `POST /api/ingest/facebook` with `INGEST_SECRET` bearer
-- Gated by `FB_INGESTION_ENABLED` flag (default False)
-- Health tracked in `ingest_state` table (last_ok_at, warning counters)
-- Hebrew/English sqm regex handles מ״ר, מטר, sqm, m², etc.
+- Apify actor `apify/facebook-groups-scraper` triggered daily 10:00 IDT by Oracle VM systemd timer (`pdis-fb-scraper.timer` → `/opt/pdis-fb-scraper/run.sh` → `apify_to_pdis.py`)
+- Apify provides residential proxies internally — no separate proxy needed
+- 14 active TLV rental groups, `RESULTS_PER_GROUP=5` per run (~70 posts/day)
+- VM script first GETs `/api/ingest/facebook/existing-ids` to skip LLM parsing on already-seen posts
+- Claude Haiku 4.5 (`vm-scraper/llm_parse.py`) extracts structured fields from Hebrew post text (intent, price, sqm, rooms, phone, neighborhood, street/house, is_agent, amenities, available_date)
+- POSTs to Render at `POST /api/ingest/facebook` with `INGEST_SECRET` bearer (40 posts/batch)
+- Gated by `FB_INGESTION_ENABLED` flag (must be true on Render)
+- Health tracked in `ingest_state` table (last_ok_at, warning counters); exposed at `GET /api/ingest/facebook/health`
+- Cost: ~$5.80/mo Apify net + ~$1.80/mo Haiku = ~$7.60/mo
+- Legacy Playwright scraper (`vm-scraper/run.py`) + cookies (`vm-scraper/fb_state.json`) are now unused but not yet deleted
 
 ### Facebook Marketplace (parked)
 - Different from FB Groups. Needs Playwright + perceptual image hashing.
@@ -185,8 +189,6 @@ Computed in `signals.py`. No numeric scores — signals are either **strong** or
 | `weak_language` | Hebrew distress keywords in description (דחוף, גמיש, חייב, etc.) |
 | `condition_keywords` | Renovation/old property keywords (שיפוץ, סבתא, ריענון) |
 | `below_avg_price` | Price/sqm > 20% below neighborhood average |
-| `below_closed_comps` | Price/sqm materially below closed-transaction comps for this building |
-| `above_closed_comps_20pct` | Price/sqm > 20% above closed-transaction comps (possible overpricing = leverage) |
 
 ### Weak Signals
 
@@ -272,7 +274,7 @@ FastAPI matches routes top-to-bottom. Path parameter routes (`{preset_id}`, `{ya
 | Yad2 rent | Render | `/realestate/rent` not blocked; curl_cffi Chrome impersonation works from Render IP |
 | Madlan | Render | PerimeterX cookie enough; no browser needed |
 | Yad2 forsale | Oracle VM (`vm-scraper/run_yad2.py`) | `/forsale` IP-blocked by ShieldSquare on Render |
-| Facebook Groups | Oracle VM (`vm-scraper/run.py`) | Real browser required (Playwright + cookies) |
+| Facebook Groups | Apify (cloud) + Oracle VM orchestrator | Apify scrapes via residential proxies; VM systemd timer triggers daily at 10:00 IDT |
 | Govmap backfill | Oracle VM (`vm-scraper/run_govmap.py`) | Long-running backfill, tmux/persistent disk |
 
 Rule of thumb: **Render until it breaks, VM when it must.** VM workers POST to Render's ingest endpoints (`/api/ingest/facebook`, `/api/ingest/yad2`, `/api/ingest/govmap-deals`) with `INGEST_SECRET` bearer.
@@ -285,7 +287,7 @@ Rule of thumb: **Render until it breaks, VM when it must.** VM workers POST to R
 
 ## Govmap Closed Transactions
 
-`closed_transactions` table stores historical rental/sale deals from govmap (gush/parcel, centroid coords, sale price, deal date, year built). Used by `pdis/comps.py` to compute building-level comps, which feed the `below_closed_comps` / `above_closed_comps_20pct` signals and the UI's "comparable deals" section.
+`closed_transactions` table stores historical rental/sale deals from govmap (gush/parcel, centroid coords, sale price, deal date, year built). Used by `pdis/comps.py` to compute building-level comps, surfaced as a raw "Recent sales in this building" panel on PropertyDetailPage (Amit-approved Option 2 — no median-derived signals, just the comps themselves).
 
 Backfill script: `vm-scraper/run_govmap.py` on the Oracle VM. POSTs in batches to `POST /api/ingest/govmap-deals`. Gated by `GOVMAP_INGESTION_ENABLED`.
 
@@ -302,7 +304,8 @@ Backfill script: `vm-scraper/run_govmap.py` on the Oracle VM. POSTs in batches t
 | `FB_SCANS_PER_DAY` | int, FB VM scan cadence (1 during probation, 2 normal) |
 | `YAD2_VM_INGESTION_ENABLED` | bool, gate for `/api/ingest/yad2` (forsale) |
 | `GOVMAP_INGESTION_ENABLED` | bool, gate for `/api/ingest/govmap-deals` |
-| `PROXY_URL` | Residential proxy (required for FB VM scraper) |
+| `APIFY_TOKEN` | Apify API token for FB Groups scraper (set on VM, not Render) |
+| `ANTHROPIC_API_KEY` | Haiku 4.5 for FB post field extraction (set on VM, not Render) |
 | `MADLAN_*` | Timeouts, delays, retries for Madlan scraper |
 | `SCRAPE_*` | Page/request settings for Yad2 rent scraper |
 | `LOG_LEVEL`, `LOG_FORMAT` | App logging |
