@@ -18,6 +18,7 @@ from pdis.database import check_connection
 from pdis.models import ScrapedListing
 from pdis.scanner import run_scan, run_all_scans, run_scan_from_listings
 from pdis.signals import compute_signals_batch
+from pdis.yad2_phone import normalize_phone
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
@@ -2079,6 +2080,7 @@ class FacebookPost(BaseModel):
     address_city: str | None = None
     address_street: str | None = None
     address_home_number: int | None = None
+    floor: int | None = None
     image_urls: list[str] = []
     like_count: int | None = None
     listing_url: str
@@ -2143,7 +2145,7 @@ async def _fb_post_to_listing(post: FacebookPost) -> ScrapedListing | None:
         address_city=address_city,
         neighborhood=post.neighborhood,
         rooms=post.rooms,
-        floor=None,
+        floor=post.floor,
         total_floors=None,
         square_meters=post.square_meters,
         square_meter_build=None,
@@ -2152,7 +2154,7 @@ async def _fb_post_to_listing(post: FacebookPost) -> ScrapedListing | None:
         property_type=None,
         description=post.description,
         contact_name=post.author_name,
-        contact_phone=post.contact_phone,
+        contact_phone=normalize_phone(post.contact_phone),
         image_urls=post.image_urls,
         listing_url=post.listing_url,
         yad2_date_added=post.posted_at,

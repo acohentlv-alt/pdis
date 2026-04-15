@@ -244,6 +244,7 @@ def main() -> None:
             "square_meters": extract_sqm(text),
             "neighborhood": extract_neighborhood(text),
             "address_city": None,
+            "floor": None,
             "image_urls": image_urls,
             "like_count": item.get("topReactionsCount") or 0,
             "listing_url": item.get("url") or "",
@@ -302,6 +303,11 @@ def main() -> None:
             if result.get("house_number") is not None:
                 try:
                     p["address_home_number"] = int(result["house_number"])
+                except (TypeError, ValueError):
+                    pass
+            if result.get("floor") is not None:
+                try:
+                    p["floor"] = int(result["floor"])
                 except (TypeError, ValueError):
                     pass
         cost = llm_estimate_cost(usage_stats)

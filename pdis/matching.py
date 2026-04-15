@@ -1,5 +1,7 @@
 """Property matching — detect duplicate listings for the same apartment."""
 import math
+import re
+import unicodedata
 import structlog
 import pdis.database as _db
 from psycopg.rows import dict_row
@@ -505,6 +507,241 @@ async def detect_customer_relistings(session_id: int) -> int:
         await conn.commit()
 
     logger.info("matching.customer_relistings", session_id=session_id, count=inserted)
+    return inserted
+
+
+# ---------------------------------------------------------------------------
+# FB cross-source matcher (Brief B)
+# ---------------------------------------------------------------------------
+
+_HEB_STREET_PREFIX_RX = re.compile(r"^\s*(רחוב|רח['׳\"״]?)\s+")
+_WHITESPACE_RX = re.compile(r"\s+")
+_HEB_LETTER_SUFFIX_RX = re.compile(r"[\u05d0-\u05ea]+$")
+
+
+def _normalize_hebrew_street(s: str | None) -> str | None:
+    """Normalize a Hebrew street name for equality comparison.
+    NFKC, strip geresh/gershayim/quotes, dash-to-space, strip
+    רחוב/רח׳/רח' prefix, collapse whitespace, lowercase."""
+    if not s:
+        return None
+    t = unicodedata.normalize("NFKC", s)
+    t = t.replace("\u05F3", "").replace("\u05F4", "")  # geresh, gershayim
+    t = t.replace("'", "").replace("\"", "")
+    t = re.sub(r"[\u2010-\u2015\-]", " ", t)
+    t = _HEB_STREET_PREFIX_RX.sub("", t)
+    t = _WHITESPACE_RX.sub(" ", t).strip().lower()
+    return t or None
+
+
+def _normalize_home_number(n) -> str | None:
+    """Normalize house number for equality.
+    Strip whitespace, lowercase, then strip trailing Hebrew letter suffix
+    (e.g. '12א' -> '12') so building-level matches land."""
+    if n is None:
+        return None
+    s = str(n).strip().lower()
+    s = _WHITESPACE_RX.sub("", s)
+    s = _HEB_LETTER_SUFFIX_RX.sub("", s).strip()
+    return s or None
+
+
+async def find_fb_cross_source_matches(session_id: int) -> int:
+    """
+    Match FB posts to Yad2/Madlan listings (or vice versa) using phone,
+    address, rooms, price, and floor — no GPS required.
+
+    Runs both directions:
+      (A) new FB rows in this session × existing non-FB rows
+      (B) new non-FB rows in this session × existing FB rows
+
+    Tier 10: phone + address match + rooms-veto (auto-confirm, 0.95)
+    Tier 11: address + rooms + price-within-25% (auto-confirm, 0.80)
+    Tier 12: address + price-within-25% (pending review, 0.65)
+    Floor veto: if both sides have floor and they differ, skip.
+    Rooms veto (Tier 10): if both sides have rooms and they differ, skip
+                          regardless of phone+address match.
+
+    Multiple matches per property are allowed — each pair writes its own row.
+    Returns count of new matches inserted.
+    """
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT DISTINCT p.id, p.source, p.address_city, p.address_street,
+                                p.address_home_number, p.rooms, p.floor,
+                                p.price, p.contact_phone
+                FROM property_snapshots ps
+                JOIN properties p ON p.id = ps.property_id
+                WHERE ps.session_id = %s
+                  AND p.is_active = TRUE
+                """,
+                (session_id,),
+            )
+            session_props = [dict(r) for r in await cur.fetchall()]
+
+    if not session_props:
+        return 0
+
+    session_fb = [p for p in session_props if p["source"] == "facebook"]
+    session_non_fb = [p for p in session_props if p["source"] != "facebook"]
+
+    cities = list({p["address_city"] for p in session_props if p["address_city"]})
+    if not cities:
+        return 0
+
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT id, source, address_city, address_street, address_home_number,
+                       rooms, floor, price, contact_phone
+                FROM properties
+                WHERE address_city = ANY(%s)
+                  AND is_active = TRUE
+                  AND source = 'facebook'
+                """,
+                (cities,),
+            )
+            all_fb = [dict(r) for r in await cur.fetchall()]
+
+            await cur.execute(
+                """
+                SELECT id, source, address_city, address_street, address_home_number,
+                       rooms, floor, price, contact_phone
+                FROM properties
+                WHERE address_city = ANY(%s)
+                  AND is_active = TRUE
+                  AND source != 'facebook'
+                """,
+                (cities,),
+            )
+            all_non_fb = [dict(r) for r in await cur.fetchall()]
+
+    session_fb_ids = {p["id"] for p in session_fb}
+    session_non_fb_ids = {p["id"] for p in session_non_fb}
+
+    pairs: list[tuple[dict, dict]] = []
+    for fb in session_fb:
+        for nfb in all_non_fb:
+            if nfb["address_city"] != fb["address_city"]:
+                continue
+            pairs.append((fb, nfb))
+    for nfb in session_non_fb:
+        for fb in all_fb:
+            if fb["address_city"] != nfb["address_city"]:
+                continue
+            if fb["id"] in session_fb_ids and nfb["id"] in session_non_fb_ids:
+                continue  # covered by Direction A
+            pairs.append((fb, nfb))
+
+    if not pairs:
+        return 0
+
+    matches_to_insert: list[tuple] = []
+
+    for fb, nfb in pairs:
+        # Floor veto
+        f_fb = fb.get("floor")
+        f_nfb = nfb.get("floor")
+        if f_fb is not None and f_nfb is not None and f_fb != f_nfb:
+            continue
+
+        id_a = min(fb["id"], nfb["id"])
+        id_b = max(fb["id"], nfb["id"])
+
+        street_fb = _normalize_hebrew_street(fb.get("address_street"))
+        street_nfb = _normalize_hebrew_street(nfb.get("address_street"))
+        home_fb = _normalize_home_number(fb.get("address_home_number"))
+        home_nfb = _normalize_home_number(nfb.get("address_home_number"))
+
+        address_match = (
+            street_fb is not None
+            and street_nfb is not None
+            and street_fb == street_nfb
+            and home_fb is not None
+            and home_nfb is not None
+            and home_fb == home_nfb
+        )
+
+        phone_fb = fb.get("contact_phone")
+        phone_nfb = nfb.get("contact_phone")
+        phone_match = (
+            phone_fb is not None
+            and phone_nfb is not None
+            and phone_fb == phone_nfb
+        )
+
+        rooms_fb = fb.get("rooms")
+        rooms_nfb = nfb.get("rooms")
+        rooms_match = (
+            rooms_fb is not None
+            and rooms_nfb is not None
+            and float(rooms_fb) == float(rooms_nfb)
+        )
+
+        price_fb = fb.get("price")
+        price_nfb = nfb.get("price")
+        price_match_25 = (
+            price_fb is not None
+            and price_nfb is not None
+            and _price_within_pct(price_fb, price_nfb, 0.25)
+        )
+
+        # Tier 10: phone + address, with rooms veto
+        if phone_match and address_match:
+            # Rooms veto: both known and differ -> skip
+            if rooms_fb is not None and rooms_nfb is not None and float(rooms_fb) != float(rooms_nfb):
+                continue
+            matches_to_insert.append(
+                (id_a, id_b, 10, "fb_phone_and_address", 0.95, True)
+            )
+            continue
+
+        # Tier 11: address + rooms + price-within-25%
+        if address_match and rooms_match and price_match_25:
+            matches_to_insert.append(
+                (id_a, id_b, 11, "fb_address_rooms_price", 0.80, True)
+            )
+            continue
+
+        # Tier 12: address + price-within-25%
+        if address_match and price_match_25:
+            matches_to_insert.append(
+                (id_a, id_b, 12, "fb_address_price", 0.65, None)
+            )
+
+    if not matches_to_insert:
+        logger.info("fb_cross_source_match.done", session_id=session_id, new_matches=0)
+        return 0
+
+    # Dedup by (id_a, id_b) — keep best (lowest tier number)
+    seen: dict[tuple[int, int], tuple] = {}
+    for m in matches_to_insert:
+        key = (m[0], m[1])
+        if key not in seen or m[2] < seen[key][2]:
+            seen[key] = m
+
+    inserted = 0
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            for m in seen.values():
+                id_a, id_b, tier, reason, confidence, is_confirmed = m
+                await cur.execute(
+                    """
+                    INSERT INTO property_matches
+                        (property_id_a, property_id_b, match_tier, match_reason, confidence, is_confirmed)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (property_id_a, property_id_b) DO NOTHING
+                    """,
+                    (id_a, id_b, tier, reason, confidence, is_confirmed),
+                )
+                if cur.rowcount > 0:
+                    inserted += 1
+        await conn.commit()
+
+    logger.info("fb_cross_source_match.done", session_id=session_id, new_matches=inserted)
     return inserted
 
 

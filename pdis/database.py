@@ -318,8 +318,13 @@ async def run_migrations() -> None:
                     hood_id = (raw_data->>'hood_id')::integer,
                     customer_id = raw_data->>'customer_id',
                     accessibility = COALESCE(raw_data->>'handicapped_text', '') != ''
-                WHERE source IS NULL OR latitude IS NULL
+                WHERE source IS NULL
+                  AND yad2_id NOT LIKE 'fb_%'
+                  AND yad2_id NOT LIKE 'madlan_%'
             """)
+            rowcount = cur.rowcount
+            if rowcount and rowcount > 0:
+                logger.warning("db.migration_updated_rows", count=rowcount)
 
             await cur.execute("""
                 CREATE TABLE IF NOT EXISTS property_operator_input (

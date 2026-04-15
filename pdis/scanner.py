@@ -678,7 +678,7 @@ async def run_scan(preset_id: int) -> dict:
 
         from pdis.events import detect_events
         from pdis.classification import persist_signals_batch
-        from pdis.matching import find_matches, detect_customer_relistings, backfill_year_built_from_matches, backfill_year_built_from_buildings
+        from pdis.matching import find_matches, find_fb_cross_source_matches, detect_customer_relistings, backfill_year_built_from_matches, backfill_year_built_from_buildings
 
         # Detect events by comparing to previous snapshots
         event_count = await detect_events(session_id, preset_id)
@@ -689,6 +689,10 @@ async def run_scan(preset_id: int) -> dict:
         match_count = await find_matches(session_id)
         if match_count > 0:
             log.info("scanner.matches_found", count=match_count)
+        fb_match_count = await find_fb_cross_source_matches(session_id)
+        if fb_match_count > 0:
+            log.info("scanner.fb_matches_found", count=fb_match_count)
+        match_count += fb_match_count
         await _update_progress(session_id, 97)
 
         # Backfill year_built from matches and building_metadata before signal persistence
@@ -842,7 +846,7 @@ async def run_scan_from_listings(preset_id: int, listings: list[ScrapedListing],
 
         from pdis.events import detect_events
         from pdis.classification import persist_signals_batch
-        from pdis.matching import find_matches, detect_customer_relistings, backfill_year_built_from_matches, backfill_year_built_from_buildings
+        from pdis.matching import find_matches, find_fb_cross_source_matches, detect_customer_relistings, backfill_year_built_from_matches, backfill_year_built_from_buildings
 
         event_count = await detect_events(session_id, preset_id)
         log.info("scanner.ingest_events_detected", count=event_count)
@@ -851,6 +855,10 @@ async def run_scan_from_listings(preset_id: int, listings: list[ScrapedListing],
         match_count = await find_matches(session_id)
         if match_count > 0:
             log.info("scanner.ingest_matches_found", count=match_count)
+        fb_match_count = await find_fb_cross_source_matches(session_id)
+        if fb_match_count > 0:
+            log.info("scanner.fb_matches_found", count=fb_match_count)
+        match_count += fb_match_count
 
         # Backfill year_built from matches and building_metadata before signal persistence
         property_ids = await _get_property_ids_for_session(session_id)
