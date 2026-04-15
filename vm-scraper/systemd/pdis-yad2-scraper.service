@@ -4,6 +4,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
+User=ubuntu
 Type=oneshot
 WorkingDirectory=/opt/pdis-yad2-scraper
 ExecStart=/opt/pdis-yad2-scraper/run_yad2.sh
