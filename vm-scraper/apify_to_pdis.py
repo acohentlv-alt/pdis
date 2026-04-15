@@ -245,6 +245,8 @@ def main() -> None:
             "neighborhood": extract_neighborhood(text),
             "address_city": None,
             "floor": None,
+            "intent": None,
+            "confidence": None,
             "image_urls": image_urls,
             "like_count": item.get("topReactionsCount") or 0,
             "listing_url": item.get("url") or "",
@@ -308,6 +310,13 @@ def main() -> None:
             if result.get("floor") is not None:
                 try:
                     p["floor"] = int(result["floor"])
+                except (TypeError, ValueError):
+                    pass
+            if result.get("intent"):
+                p["intent"] = str(result["intent"]).strip().lower()
+            if result.get("confidence") is not None:
+                try:
+                    p["confidence"] = float(result["confidence"])
                 except (TypeError, ValueError):
                     pass
         cost = llm_estimate_cost(usage_stats)

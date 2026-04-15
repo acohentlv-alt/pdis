@@ -2086,6 +2086,8 @@ class FacebookPost(BaseModel):
     address_street: str | None = None
     address_home_number: int | None = None
     floor: int | None = None
+    intent: str | None = None
+    confidence: float | None = None
     image_urls: list[str] = []
     like_count: int | None = None
     listing_url: str
@@ -2133,8 +2135,14 @@ async def _reset_fb_warning_counter() -> None:
 async def _fb_post_to_listing(post: FacebookPost) -> ScrapedListing | None:
     """
     Convert a FacebookPost to a ScrapedListing.
-    Returns None if the post should be skipped (empty description AND no phone).
+    Returns None if the post should be skipped (non-property / wanted / low-confidence / empty).
     """
+    # Skip non-property or "wanted" posts — only ingest actual offerings for rent or sale.
+    if post.intent is not None and post.intent not in ("rent", "sale"):
+        return None
+    # Skip low-confidence extractions — Haiku wasn't sure what this post was.
+    if post.confidence is not None and post.confidence < 0.3:
+        return None
     # Skip only if both description is empty AND no phone
     if not post.description.strip() and post.contact_phone is None:
         return None
