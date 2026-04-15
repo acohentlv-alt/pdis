@@ -80,6 +80,17 @@ export default function PropertyCard({
   const [showViewer, setShowViewer] = useState(false);
   const [phoneRevealed, setPhoneRevealed] = useState(false);
 
+  const formatPhone = (raw: string): string => {
+    const digits = raw.replace(/\D/g, '');
+    if (digits.length === 10 && digits.startsWith('0')) {
+      return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+    }
+    if (digits.length === 9 && digits.startsWith('0')) {
+      return `${digits.slice(0, 2)}-${digits.slice(2, 5)}-${digits.slice(5)}`;
+    }
+    return raw;
+  };
+
   const whatIsItParts: string[] = [];
   if (propertyType) whatIsItParts.push(propertyType.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()));
   if (rooms != null) whatIsItParts.push(`${String(rooms)} rooms`);
@@ -162,7 +173,7 @@ export default function PropertyCard({
           )}
           {!hasAmitPill && belowAvgPrice && <span className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full">Below avg</span>}
         </div>
-        {source === 'facebook' && (item.contact_phone as string | null) && (
+        {(item.contact_phone as string | null) ? (
           <div className="flex items-center gap-2 text-sm">
             {phoneRevealed ? (
               <a
@@ -170,12 +181,12 @@ export default function PropertyCard({
                 className="text-blue-600 underline"
                 onClick={(e) => e.stopPropagation()}
               >
-                {item.contact_phone as string}
+                {formatPhone(item.contact_phone as string)}
               </a>
             ) : (
               <>
                 <span className="text-gray-500">
-                  {(item.contact_phone as string).slice(0, 3)}-***-****
+                  {(item.contact_phone as string).replace(/\D/g, '').slice(0, 3)}-***-****
                 </span>
                 <button
                   aria-label="Show phone number"
@@ -183,7 +194,7 @@ export default function PropertyCard({
                   onClick={(e) => {
                     e.stopPropagation();
                     setPhoneRevealed(true);
-                    fetch('/api/ingest/facebook/log-reveal', {
+                    fetch('/api/log-reveal', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ yad2_id: yad2Id }),
@@ -196,7 +207,19 @@ export default function PropertyCard({
               </>
             )}
           </div>
-        )}
+        ) : source === 'facebook' && sourceUrl ? (
+          <div className="flex items-center gap-2 text-sm">
+            <a
+              href={sourceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 underline"
+              onClick={(e) => e.stopPropagation()}
+            >
+              Message on Facebook →
+            </a>
+          </div>
+        ) : null}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1">
             {onToggleFavorite && (
