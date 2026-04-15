@@ -114,43 +114,47 @@ Depends on full-city govmap backfill (in progress) + Amit providing thresholds f
 
 ---
 
+## SHIPPED — FB Groups via Apify + Haiku (2026-04-15 evening pivot)
+
+**Resurrected after the "park" decision when a fresh diagnostic revealed FB IS scrapeable** — the original failure was a too-aggressive modal-dismiss loop + outdated `_parse_post` selectors, NOT FB anti-bot. By that point we'd already validated Apify works perfectly (910 real posts in 90s), so we pivoted to Apify instead of fixing Playwright.
+
+**Architecture (live):**
+- **Daily scrape:** Apify actor `apify/facebook-groups-scraper` runs at 10:00 Asia/Jerusalem
+  - Triggered by Oracle VM systemd timer (`/etc/systemd/system/pdis-fb-scraper.timer`)
+  - VM script: `/opt/pdis-fb-scraper/run.sh` → `apify_to_pdis.py`
+  - 14 active TLV rental groups, `resultsLimit=5` per group = ~70 posts/run
+- **LLM parse:** Claude Haiku 4.5 extracts structured fields from Hebrew post text
+  - `vm-scraper/llm_parse.py` — system prompt cached for ~80% input cost reduction
+  - Extracts: intent, price, sqm, rooms, phone, neighborhood, is_agent, floor, property_type, balcony, elevator, parking, ac, furnished, available_date, confidence
+- **Ingest:** POST to `/api/ingest/facebook` (40 posts/batch); existing scan pipeline upserts properties, runs matching/signals
+- **PropertyCard:** when a FB post has no phone, shows "Message on Facebook" link to permalink
+
+**Cost:**
+- Apify: ~$10/mo (PAYG, $5 free credit covers ~half)
+- Haiku: ~$1.80/mo
+- Decodo proxy: cancelled (Apify provides residential proxies internally)
+- **Total: ~$12/mo**
+
+**Initial backfill (2026-04-15):** 738 posts ingested from a one-shot 14-group×65-post Apify run that we paid $4.55 for during testing.
+
+**Known gaps (TODO if Shechter wants):**
+- Some posts reference non-TLV cities (e.g. פרדס חנה) and get mislabeled as TLV — need server-side text-based city detection or per-group city overrides in `fb_groups` table
+- 2 batches failed during initial backfill with 500 errors — those 80 posts kept first-pass field values; healed on next daily scan
+- LLM `is_agent` flag flows through but isn't used in PropertyCard yet (UI shows "Agent" badge based on `item.is_agent` — works once data is queryable)
+- FilterBar dropdown still missing `Facebook` option (see TODO below) — for now "All sources" includes FB
+
+**Resurrection-time architecture notes (kept for posterity):**
+- Real fix to original Playwright path was: don't dismiss the auth modal (it doesn't block hydration), use `[role="article"]` selector, parse via `inner_text()` on the article element, switch to `www.facebook.com`. We now have Apify so this is academic.
+
+### TODO — FilterBar Facebook source option
+`frontend/src/components/FilterBar.tsx:124-126` only offers Yad2/Madlan. Add `<option value="facebook">Facebook</option>` so Shechter can filter to FB-only.
+
+### TODO — Per-group city overrides
+Some FB groups include posts from non-TLV cities. Either: (a) add a `default_city` column to `fb_groups` table and pass through to `_fb_post_to_listing`, or (b) trust the LLM's neighborhood detection and skip non-TLV posts when neighborhood is null AND text doesn't contain TLV keywords.
+
+---
+
 ## PARKED
 
-### FB Groups scraping — PARKED 2026-04-15 (abandoned after two failed bring-up attempts)
-
-**Decision:** Kill direct FB Groups scraping. Ship PDIS on Yad2 + Madlan + govmap only. Revisit only if we're willing to pay a commercial vendor ($30–100/mo) for maintained selectors.
-
-**What's deployed but disabled:**
-- Oracle VM at `/opt/pdis-fb-scraper/` — full scraper code, Decodo residential proxy wired, FB cookies loaded, systemd unit files installed
-- `pdis-fb-scraper.timer` disabled (`systemctl disable` run 2026-04-15) — does not fire
-- Render: `FB_INGESTION_ENABLED=true` (left as-is, endpoint just sits idle with no VM feeder)
-- DB migration seeded `extra_params.fb_groups` on FB-source presets (harmless even when scraper is off)
-- `fb_groups` table has 49 groups seeded; 14 are `is_active=TRUE`
-- FB-source preset in `search_presets` still active — will show no listings, which is correct
-
-**Root cause (confirmed by two independent agents 2026-04-15):**
-- `mbasic.facebook.com` deprecated — redirects to `www.facebook.com`
-- `m.facebook.com` page loads but content hydrates behind JS; `article`/`role="article"` selectors return 0 matches
-- `www.facebook.com` renders empty skeleton `<article>` elements; real post content loads into **obfuscated CSS classes that rotate weekly** (per Meta's anti-scraping posture)
-- No stable selector path exists for Playwright + cookies today
-- Verified live against 14 TLV rental groups with valid FB session cookies (c_user/xs/datr all present) — zero posts extractable across all URL variants
-
-**Sunk costs:** ~2 days of planning + agent work across two sessions. Decodo trial signed up (no recurring charge yet).
-
-**To resurrect (when/if):**
-1. Pick a commercial vendor: Apify (~$30–100/mo, pay-per-run), ScrapFly ($30–100/mo), BrightData Facebook Dataset (per-row pricing). They maintain selectors.
-2. Rewrite `vm-scraper/run.py` to call vendor API instead of Playwright. Keep `/api/ingest/facebook` endpoint — it's a stable target.
-3. Re-enable the systemd timer: `sudo systemctl enable --now pdis-fb-scraper.timer`
-4. FB UX polish tasks below become relevant again.
-
-**FB UX polish (parked — only relevant if FB Groups resurrects):**
-- FilterBar dropdown: add `<option value="facebook">Facebook</option>` in `frontend/src/components/FilterBar.tsx:124-126`
-- `is_agent` broker flag plumbing: `FacebookPost` model (`pdis/api/routes.py:2068-2083`) → `_fb_post_to_listing` (`pdis/api/routes.py:2125-2160`) → `ScrapedListing` → `properties`. Currently dropped silently by Pydantic default `extra='ignore'`.
-- FB Brief #2: FB-aware dedup, new FB-specific signals (no-broker badge, multi-group cross-post = high distress), Nominatim geocoding for neighborhoods
-- FB Brief #3: source filter dropdown, "Hide brokers" toggle, "Report this listing" link
-- LLM post-parsing via Haiku (~$0.10/mo) for freeform Hebrew — stash reference in abandoned laptop-daemon pivot
-- `normalize_city()` helper in `pdis/utils/city.py` (stashed) — was FB-motivated; no current need
-- Cleanup if never resurrected: delete `/opt/pdis-fb-scraper/` from VM, delete `vm-scraper/` from repo, drop `fb_groups` + `ingest_state.facebook` rows, remove `/api/ingest/facebook` route, remove FB-source presets
-
 ### FB Marketplace integration
-Different from FB Groups. Needs Playwright + perceptual image hashing. Blocked by the same Meta-scraping wall as FB Groups — revisit only under the commercial-vendor decision above.
+Different from FB Groups (which now ships via Apify). Marketplace would need a separate Apify actor — revisit only if Groups doesn't give enough volume for Shechter.
