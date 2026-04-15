@@ -91,20 +91,25 @@ Once A2 (FB laptop daemon + queue) ships and stabilizes, move the whole app off 
 
 **Rule:** do this **after A2 ships and proves stable for 1+ week.** Don't compound moving pieces mid-flight.
 
-### 🔍 Haifa Buy preset — "Last scan blocked — source returned nothing" (investigate tomorrow)
-Screenshot flagged by Alan Apr 15 late: `Haifa Buy` preset (Yad2, All neighborhoods, Active) shows *"Last scan blocked — source returned nothing"*.
+### 🔍 Haifa Buy preset — blocked (root cause found, fix pending)
+Screenshot flagged by Alan Apr 15. Investigated same day, **root cause is NOT ShieldSquare** (initial hypothesis was wrong — three other forsale presets succeeded Apr 14, so `/forsale` is not IP-blocked from Render).
 
-**Leading hypothesis:** it's a Yad2 forsale preset → `/forsale` IP-blocked on Render by ShieldSquare → scrape returns empty → scanner marks session blocked. The fix path is the Oracle VM (`vm-scraper/run_yad2.py` + `YAD2_VM_INGESTION_ENABLED=true`), which is the same unfinished A2-adjacent work as FB.
+**Actual root cause:** Preset 9 (`Haifa Buy`, `city_code=4000`, `category=forsale`) has **zero filters** — no price, no rooms, no property types. It asks Yad2 for *every* Haifa for-sale listing, which is too broad → Yad2's anti-bot throttles → "Yad2 blocked the request — zero listings retrieved". The Apr 3 run surfaced the warning ("Partial block detected on final page but 240 listings collected") — it was always borderline.
 
-**But two oddities to verify first:**
-1. Why is there a **Haifa** preset at all? PDIS is Tel Aviv–focused. Is this a test preset or Alan's personal use?
-2. If forsale scraping is broken on Render, *all* forsale presets should be blocked. Is this the only forsale preset currently active? Check `SELECT * FROM search_presets WHERE is_active AND extra_params->>'source' LIKE '%forsale%'` (approximate — verify actual schema).
+**Evidence (from `scan_sessions` query Apr 15):**
+- Preset 9 (no filters): 2 sessions total in 12 days, last blocked Apr 13
+- Preset 11 (Haifa Buy - Small Apts, has filters): 3 sessions, last done Apr 14
+- Preset 12 (Haifa Buy - Buildings, has filters): 1 session, last done Apr 14
+- Preset 23 (Florentin Buy - Amit, has filters): 5 sessions, last done Apr 14
 
-**First steps tomorrow:**
-- List all active presets, grouped by source + city, to see the scope of the problem.
-- Check last 2-3 `scan_sessions` rows for Haifa Buy — what was the exact HTTP status / error body from Yad2?
-- If every forsale preset is blocked → same fix as FB (VM cron, flag flip).
-- If only Haifa is blocked → dig into Haifa-specific request params (city code, geofence).
+**Two open questions to confirm:**
+1. **Why is preset 9 not on the main rotation?** Only 2 sessions in 12 days vs 5 for Florentin. Suggests a scanner cooldown on blocked presets or manual-trigger-only. Check `scanner.py::run_all_scans` for skip logic.
+2. **Why Haifa presets at all?** PDIS is documented as Tel Aviv. Intentional market expansion, Alan's personal use, or test presets?
+
+**Recommended fix (pick one):**
+- **Option A (simplest):** Delete preset 9 — redundant with presets 11 + 12 which cover Haifa with filters and already work.
+- **Option B:** Add `max_price` and `max_rooms` filters to preset 9 to narrow the result set.
+- **Option C (wrong):** Deploy VM forsale path — does not address the actual cause (unfiltered query, not IP block).
 
 ### ₪/m² math fix on PropertyCard
 First card shows `4,299,999 ₪ · 82m² (95 total) · 52,439 ₪/m²`. The ₪/m² uses the smaller (build) area. Israeli real estate convention = gross/total. One-line fix in `frontend/src/components/PropertyCard.tsx`: prefer total area, or show both. Quick win.
