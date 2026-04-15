@@ -1,0 +1,12 @@
+[Unit]
+Description=PDIS Facebook Groups scraper
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/pdis-fb-scraper
+ExecStart=/opt/pdis-fb-scraper/run.sh
+EnvironmentFile=/opt/pdis-fb-scraper/.env
+StandardOutput=append:/var/log/pdis-fb-scraper.log
+StandardError=append:/var/log/pdis-fb-scraper.log

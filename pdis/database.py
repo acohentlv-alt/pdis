@@ -530,6 +530,36 @@ async def run_migrations() -> None:
             await cur.execute("ALTER TABLE property_classifications DROP COLUMN IF EXISTS distress_score")
             await cur.execute("ALTER TABLE scan_preset_stats DROP COLUMN IF EXISTS opportunities")
 
+            # A2: Seed fb_groups array per preset — one-shot, idempotent.
+            # GUARDED: only populates presets where fb_groups is NULL or empty.
+            # Never overwrites Alan's manual curation via the admin UI.
+            await cur.execute("""
+                UPDATE search_presets sp
+                   SET extra_params = COALESCE(sp.extra_params, '{}'::jsonb)
+                                   || jsonb_build_object(
+                                          'fb_groups',
+                                          COALESCE(
+                                              (SELECT jsonb_agg(g.group_id ORDER BY g.group_id)
+                                                 FROM fb_groups g
+                                                WHERE g.is_active = TRUE),
+                                              '[]'::jsonb
+                                          )
+                                      )
+                 WHERE sp.is_active = TRUE
+                   AND COALESCE(sp.extra_params->>'source', 'yad2') IN ('yad2', 'facebook')
+                   AND (sp.extra_params->'fb_groups' IS NULL
+                        OR sp.extra_params->'fb_groups' = '[]'::jsonb)
+            """)
+
+            # A2: Reset phantom ingest_state.facebook row (last_ok_at was set but zero fb_* properties exist).
+            await cur.execute("""
+                UPDATE ingest_state
+                   SET last_ok_at = NULL,
+                       last_check_at = NULL,
+                       warning_count = 0
+                 WHERE source = 'facebook'
+            """)
+
         await conn.commit()
     logger.info("db.migrations_done")
     await seed_presets()

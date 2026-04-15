@@ -160,3 +160,22 @@ Depends on full-city govmap backfill (in progress) + Amit providing thresholds f
 
 ### FB Marketplace integration
 Different from FB Groups (which we shipped). Needs Playwright + perceptual image hashing. Revisit after FB Groups pipeline is proven.
+
+---
+
+## POST-A2 BACKLOG
+
+### Brief #2 — FB UX Polish
+Plumb `is_agent` (broker flag) through `FacebookPost` model (pdis/api/routes.py:2068-2083)
+→ `_fb_post_to_listing` (pdis/api/routes.py:2125-2160) → `ScrapedListing` → `properties`
+so FB broker-vs-private is visible in the UI. Currently dropped silently by Pydantic
+(extra='ignore' default). Parser emits it at vm-scraper/run.py:297 but server never sees it.
+
+### LLM post-parsing (deferred)
+FB posts are freeform Hebrew text; regex misses neighborhood/intent/move-in-date/broker
+cues. After A2 flows real data for 1-2 weeks, ship Haiku-based structured extraction
+(~$0.10/mo). Stash reference: see end-session Apr 15 archive.
+
+### Operational: stagger govmap backfill (post-A2)
+If 1GB VM RAM is tight at 10:00 when FB scraper + govmap backfill overlap, pause
+govmap cron 09:55-10:10.

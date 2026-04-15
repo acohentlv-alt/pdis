@@ -1,0 +1,11 @@
+[Unit]
+Description=Run PDIS FB scraper daily at 10:00 Asia/Jerusalem
+
+[Timer]
+OnCalendar=*-*-* 10:00:00
+Timezone=Asia/Jerusalem
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target

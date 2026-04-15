@@ -20,7 +20,7 @@ Scrapes 5 TLV rental Facebook groups and sends results to the PDIS Render backen
    ssh ubuntu@129.159.158.214 'chmod 600 /opt/pdis-fb-scraper/state.json /opt/pdis-fb-scraper/.env && chmod 700 /opt/pdis-fb-scraper'
    ```
 
-4. **Create `.env` on VM** with `INGEST_SECRET`, `PDIS_API_URL`, `PROXY_URL`, `FB_SCANS_PER_DAY=1` (start low, ramp later)
+4. **Create `.env` on VM** with `INGEST_SECRET`, `PDIS_API_URL`, `PROXY_URL`
 
 5. **Install dependencies:**
    ```bash
@@ -31,28 +31,36 @@ Scrapes 5 TLV rental Facebook groups and sends results to the PDIS Render backen
    playwright install-deps  # may need sudo
    ```
 
-6. **Test run manually before cron:**
+6. **Test run manually before enabling the timer:**
    ```bash
    cd /opt/pdis-fb-scraper && ./run.sh
-   # Watch output — verify PROXY_URL is being used, no "WARN: No PROXY_URL" message
+   # Watch output — verify PROXY_URL is being used
    # Verify posts are parsed, POST to PDIS returns 200
    ```
 
-7. **Add crontab:**
-   ```
-   CRON_TZ=Asia/Jerusalem
-   0 8,18 * * * flock -n /var/lock/pdis-fb-scraper.lock /opt/pdis-fb-scraper/run.sh >> /var/log/pdis-fb-scraper.log 2>&1
-   ```
+## Install (systemd, Ubuntu VM)
 
-8. **Flip `FB_INGESTION_ENABLED=true` in Render env vars.**
+Copy unit files:
+    sudo cp systemd/pdis-fb-scraper.service /etc/systemd/system/
+    sudo cp systemd/pdis-fb-scraper.timer /etc/systemd/system/
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now pdis-fb-scraper.timer
+
+Verify:
+    systemctl list-timers pdis-fb-scraper.timer
+    # NEXT column should show 10:00 Asia/Jerusalem tomorrow
+
+If an old crontab entry exists, remove it:
+    crontab -e
+    # Delete the line invoking run.sh; save.
+
+7. **Flip `FB_INGESTION_ENABLED=true` in Render env vars.**
 
 ## Important rules (personal account ban prevention)
 
-- **NEVER run the scraper without `PROXY_URL` set in production** — datacenter IP from Oracle VM = ban
+- **WARN (not hard-fail) if `PROXY_URL` is unset** — run.sh prints a warning and continues. Low volume (once/day) on Oracle VM IP is manageable but raises ban risk.
 - **NEVER use `state.json` cookies from two places at once** — if you log into FB on laptop while scraper is running, FB sees same account from 2 IPs = ban risk
-- **Start at `FB_SCANS_PER_DAY=1`** for the first 2 weeks, then ramp to 2
-- **If you ever see "unusual activity detected" or "verify it's you" in your personal FB app** — STOP the cron immediately (`crontab -e`, comment out the line), log in manually on your laptop, resolve it
-- **Scraper must NEVER log cookie values** (already handled in run.py)
+- **If you ever see "unusual activity detected" or "verify it's you" in your personal FB app** — STOP the timer immediately (`sudo systemctl stop pdis-fb-scraper.timer`), log in manually on your laptop, resolve it
 
 ## Render environment variables to set
 
@@ -60,7 +68,6 @@ Scrapes 5 TLV rental Facebook groups and sends results to the PDIS Render backen
 |----------|---------|
 | `INGEST_SECRET` | Shared bearer token — scraper and backend must match |
 | `FB_INGESTION_ENABLED` | Set to `true` to enable FB ingest (default: `false`) |
-| `FB_SCANS_PER_DAY` | `1` = probation (08:00 only), `2` = full (08:00 + 18:00) |
 
 ## Before flipping FB_INGESTION_ENABLED=true — manual verification checklist
 
@@ -83,6 +90,31 @@ Scrapes 5 TLV rental Facebook groups and sends results to the PDIS Render backen
 - Never commit `state.json`, `fb_state.json`, or `.env` — they are in `.gitignore`
 - `state.json` contains FB session cookies — treat like a password, `chmod 600`
 - `INGEST_SECRET` is never logged by the scraper
+
+## When the scraper stops returning posts
+
+If three consecutive scheduled runs return 0 posts AND
+  SELECT warning_count FROM ingest_state WHERE source='facebook';
+returns 3 or more, your Facebook session cookies have likely expired.
+
+To refresh:
+1. On your laptop: cd vm-scraper && python3 export_fb_cookies.py
+2. scp -i ~/.ssh/oracle_vm vm-scraper/fb_state.json ubuntu@129.159.158.214:/opt/pdis-fb-scraper/state.json
+   (run.py reads state.json — that is the correct destination filename)
+3. ssh -i ~/.ssh/oracle_vm ubuntu@129.159.158.214 "sudo systemctl restart pdis-fb-scraper.timer"
+
+## When to re-run seed_fb_groups.py
+
+Only after discovering new groups via enumerate_fb_groups.py.
+It upserts from scripts/fb_groups_discovered.json (49 rows today) into
+the fb_groups table. Not needed on every scrape.
+
+## VM memory note
+
+The Oracle VM is a 1GB micro. Tight when Playwright + Chromium run
+alongside the govmap backfill. After go-live, monitor `free -m` during
+the 10:00 window. If memory pressure appears, stagger govmap backfill
+to pause 09:55-10:10 (simple cron tweak, out of A2 scope).
 
 ---
 
