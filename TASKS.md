@@ -1,12 +1,34 @@
 # PDIS — Task List
-*April 16, 2026*
+*April 15, 2026 (night session)*
 
 ---
 
-## AWAITING QA / VERIFICATION (deployed tonight, needs Alan's eyes in the browser)
+## AWAITING QA / VERIFICATION (commit 508cada deployed tonight)
 
-### Scan button UX + progress bar
-Shipped but needs manual test in deployed environment after Render auto-deploy:
+### Phones across sources
+Commit `508cada` shipped tonight. Test in deployed environment:
+- **Madlan**: next scheduled scan (08:00 IL time) should populate `contact_phone` for ~80%+ of Madlan rows. SQL: `SELECT COUNT(*) FILTER (WHERE contact_phone IS NOT NULL), COUNT(*) FROM properties WHERE yad2_id LIKE 'madlan_%'`. Was 0/713 due to GraphQL schema drift (4 bugs) — fixed.
+- **Yad2 phones**: code shipped but `YAD2_PHONE_FETCH_ENABLED=false` by default. To enable: set env var to `true` on Render, then a scheduled scan will populate phones at 40/preset (scan-time) + 310/run (backfill). 7-day cooldown via `phone_fetch_attempted_at` column. Endpoint live-tested from laptop (`fetch_phones(['n8zlan18']) → '0554360641'`).
+- **`/api/log-reveal` endpoint**: replaces old `/api/ingest/facebook/log-reveal`. Frontend wired.
+- **PropertyCard phone pill**: emerald tap-to-call when revealed, masked `055-•••-••••` otherwise. Israeli `0XX-XXX-XXXX` formatting.
+
+### Filter drawer + UI polish (commit 508cada)
+- New bottom-sheet drawer: tap "Filters (N)" button → drawer slides up. Sections: Price, Rooms, Sqm, Price/Sqm, Neighborhood, Source (now includes Facebook), Signals (split strong/weak with plain-English labels).
+- Drawer drops below NavBar (z-60); sticky "See results" footer.
+- Toast on whitelist/blacklist: "✓ Whitelisted" / "Removed from whitelist" etc. Fires on mutation onSuccess.
+- Pull-to-refresh on OpportunityPage + FavoritesPage (replaces header refresh button).
+- Header: greeting larger, gear → sliders icon (semantic "Manage searches"), tooltips.
+- SummaryBar: rounded-2xl, larger numerics, scale-on-tap.
+- PropertyCard: rounded-2xl, refined shadow, hover lift.
+- Empty-state on filtered list: explicit "Clear all filters" CTA.
+
+Manual test on iPhone:
+- Drawer opens/closes smoothly, scroll lock works, Apply button visible above bottom nav
+- Pull down at top of list → spinner → list refreshes
+- Tap whitelist/blacklist → toast appears bottom of screen (above NavBar)
+- Filters (N) badge updates as you change filters
+
+### Scan button UX + progress bar (still pending from prior session)
 - Click Run Now → button reads `Scanning X%` with live emerald bar
 - Other presets disable with "Scan running"
 - Last-scan line per preset (`Xm ago · N listings` / `Never scanned` / red `failed` / amber `blocked`)
@@ -102,9 +124,10 @@ Planned but not coded. Remove `below_closed_comps` / `above_closed_comps_20pct` 
 3. **Threshold realism audit (rent)** — Florentin rent pref=₪47-71/m²/mo vs market avg ₪120/m²/mo. Amit's rent targets are 40-50% below market → virtually nothing qualifies. Alan to decide: raise targets, or explicit "deals only" framing.
 4. **Hard 30% cap (non-negotiable)** — Alan wants to lock Amit Fit such that any property >30% above preferred target gets NO tag, regardless of the per-bucket `max` column. Two readings pending: (a) display-time filter (keep admin columns, enforce cap at signal time) or (b) auto-derive `max = pref × 1.30` (make max a computed field). Alan to pick before implementation.
 
-### Phone numbers — still broken
-- Madlan: scraper reads `poc.displayNumber` but 0/713 properties get one. Broken or API changed.
-- Yad2: requires separate click-to-reveal API call (not wired).
+### Phone numbers — SHIPPED 2026-04-15 (commit 508cada)
+- ~~Madlan: 0/713~~ → fixed (GraphQL drift). 4 schema bugs patched. Awaits next scheduled scan.
+- ~~Yad2: not wired~~ → wired (`pdis/yad2_phone.py`). Flag-off, ready to flip.
+- FB phones already flow via Apify+Haiku pipeline (separate commit by parallel agent).
 
 ### Telegram bot for scan alerts
 Send alerts when notable properties found after a scan completes.

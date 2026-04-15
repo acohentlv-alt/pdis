@@ -1,6 +1,59 @@
-# HANDOFF — April 15, 2026 (late session + consolidation session + evening session)
+# HANDOFF — April 15, 2026 (late session + consolidation session + evening session + night session)
 
-## EVENING SESSION (after consolidation — the FB Groups U-turn)
+## NIGHT SESSION (after the FB U-turn — phones across sources + filter drawer + UI polish)
+
+### What we did
+
+Started by digging into Alan's "phone number on the property cards" ask. Discovered Madlan scraping has been silently broken in production for **weeks** — schema drift killed `yearBuilt`, `year_built`, `additionalDetails` fields and a missing `square_meter_build=None` argument. Every Madlan scan was returning 0 listings without anyone noticing. Fixed all 4 bugs + added the `poc { ... AgentPoc, ... UserPoc }` GraphQL union fragments. Live-tested: 499/499 listings now return phones (was 0/713). Madlan will re-populate on next scheduled scan at 08:00 IDT.
+
+For Yad2 phones, used DevTools (Alan captured the cURL from a real session) to discover `gw.yad2.co.il/realestate-item/{token}/customer` — no auth needed, just warm-up + per-item Referer. Built `pdis/yad2_phone.py` with normalize_phone() helper, 0.6s rate limit, 429/403 backoff, 3-block abort. Wired scanner hooks (40/preset scan-time + 310/run backfill, 7-day cooldown via new `phone_fetch_attempted_at` column). **Flag-off by default** (`YAD2_PHONE_FETCH_ENABLED=false`) — Alan flips when ready. Live-tested from laptop: returns correct phone for known token.
+
+Then a big UI polish session: bottom-sheet filter drawer (replaces inline filter strip), in-house toast (~50 lines, no dep), pull-to-refresh on OpportunityPage + FavoritesPage (replaces header refresh button), refined header (greeting bigger, gear → sliders icon = "Manage searches"), refined SummaryBar stats (rounded-2xl, larger numerics), refined PropertyCards (rounded-2xl, hover lift), and a whole new PropertyCard phone pill (emerald tap-to-call, masked `055-•••-••••` otherwise, Israeli format). Added fade-in / slide-up / toast-in keyframes in index.css.
+
+Critical save during commit: parallel agent's commits had silently dropped my `phone_fetch_attempted_at` migration when they rewrote `database.py`. Caught it in the pre-commit audit and restored before pushing. Brief #2 would have crashed on flag-flip otherwise.
+
+### Commit pushed this session
+
+- `508cada` Phones across sources + filter drawer + UI polish (16 files, +1145/-229)
+
+Coexists cleanly with the parallel agent's Apify+Haiku FB pipeline (separate code paths). Their `vm-scraper/run.py` 147-line WIP deliberately excluded from this commit — they'll commit it themselves.
+
+### What's half-done
+
+- **Yad2 phone fetch is flag-off**. To turn on: set `YAD2_PHONE_FETCH_ENABLED=true` on Render. Then a scheduled scan will run the new hook. **Render reachability of `gw.yad2.co.il` is UNVERIFIED** — only tested from Alan's laptop. If Render IP is blocked, fetch fails silently (graceful), no rows fill. Suggested: flip flag, watch one scan, check `SELECT COUNT(*) FILTER (WHERE contact_phone IS NOT NULL) FROM properties WHERE source='yad2' AND phone_fetch_attempted_at > NOW() - INTERVAL '1 day'`. If still 0, the endpoint is blocked from Render → move to VM (Brief #2b).
+- **Filter drawer + UI polish needs Alan's eyes on iPhone.** Local Playwright + build pass clean, but mobile gestures (pull-to-refresh, drawer slide) need real-device test.
+- **Madlan phones**: won't appear until next scheduled scan (08:00 IDT). Expect ~80%+ fill rate based on live test.
+- **PresetManager polish queued.** Same 2030-vision design language we applied to drawer/header should extend to the PresetManager modal (3-dot menu → manage searches). Was queued for `/compact` but Alan canceled compact + ran end-session instead.
+- **`vm-scraper/run.py`** has 147 uncommitted lines from the parallel agent. Do not touch.
+
+### What to do tomorrow
+
+1. **Open https://pdis-lsah.onrender.com on iPhone** — test the new filter drawer (open/close, all sections, Apply button visible above NavBar), pull-to-refresh, toast on whitelist/blacklist tap, phone pill (currently shows on FB cards via Apify pipeline; Madlan cards after 08:00 scan).
+2. **After 08:00 IDT scheduled scan**: SQL-check Madlan phone fill. If high (≥80%), Madlan fix is verified.
+3. **Decide on Yad2 phone flag**: set `YAD2_PHONE_FETCH_ENABLED=true` on Render env if you want Yad2 phones to start filling. Then watch one scan + SQL-check.
+4. **PresetManager polish** (queued from this session) — same drawer/header treatment to the modal that opens from the sliders icon.
+5. **Cleanup pass** when parallel agent finishes their `vm-scraper/run.py` commit — likely deletes Playwright FB scraper code now that Apify owns it.
+
+### Watch out for
+
+- **My commit + parallel agent's commits raced on `routes.py` and `database.py`**. Their commits won (logged earlier). I had to re-add the `phone_fetch_attempted_at` migration. If anything else of mine got silently dropped, Brief #2 will surface it on flag-flip. Spot-check `pdis/api/routes.py` line 2201 has `/api/log-reveal` (verified at commit time).
+- **Render reachability of `gw.yad2.co.il` is the big unknown.** If blocked, all the Brief #2 code is dead weight on Render. Pivot to Oracle VM (mirror the `run_yad2.py` pattern) if so.
+- **TASKS.md was forward-dated April 16** at start of session. Updated to April 15 night session in the night-session edit.
+- **Apify keys + Anthropic key** still visible in Apify pipeline session transcript. Rotate if paranoid.
+
+### Test these (for tomorrow's manual QA on iPhone)
+
+- Hard-refresh https://pdis-lsah.onrender.com (Cmd+Shift+R or Add to Home Screen reload)
+- Tap "Filters (0)" button → drawer slides up from bottom; backdrop blurred; Apply button visible above bottom nav
+- Pick "Facebook" source pill → list filters to FB-only (need data — should have 738+ FB props from Apify)
+- Tap whitelist/blacklist on a card → toast appears bottom-center
+- Scroll list to top → pull down → spinner appears → list refreshes
+- Tap a Madlan card with phone (after 08:00 scan) → emerald "Tap to call" pill → tap → dialer opens
+- Header should show "Good evening/morning, Shechter" with sliders icon (not gear) on right
+
+---
+
+
 
 ### What we did
 
