@@ -66,6 +66,21 @@ Then install monthly cron (exact block in `TASKS_2026-04-14.md`).
 
 ## NOT STARTED
 
+### 🔍 Haifa Buy preset — "Last scan blocked — source returned nothing" (investigate tomorrow)
+Screenshot flagged by Alan Apr 15 late: `Haifa Buy` preset (Yad2, All neighborhoods, Active) shows *"Last scan blocked — source returned nothing"*.
+
+**Leading hypothesis:** it's a Yad2 forsale preset → `/forsale` IP-blocked on Render by ShieldSquare → scrape returns empty → scanner marks session blocked. The fix path is the Oracle VM (`vm-scraper/run_yad2.py` + `YAD2_VM_INGESTION_ENABLED=true`), which is the same unfinished A2-adjacent work as FB.
+
+**But two oddities to verify first:**
+1. Why is there a **Haifa** preset at all? PDIS is Tel Aviv–focused. Is this a test preset or Alan's personal use?
+2. If forsale scraping is broken on Render, *all* forsale presets should be blocked. Is this the only forsale preset currently active? Check `SELECT * FROM search_presets WHERE is_active AND extra_params->>'source' LIKE '%forsale%'` (approximate — verify actual schema).
+
+**First steps tomorrow:**
+- List all active presets, grouped by source + city, to see the scope of the problem.
+- Check last 2-3 `scan_sessions` rows for Haifa Buy — what was the exact HTTP status / error body from Yad2?
+- If every forsale preset is blocked → same fix as FB (VM cron, flag flip).
+- If only Haifa is blocked → dig into Haifa-specific request params (city code, geofence).
+
 ### ₪/m² math fix on PropertyCard
 First card shows `4,299,999 ₪ · 82m² (95 total) · 52,439 ₪/m²`. The ₪/m² uses the smaller (build) area. Israeli real estate convention = gross/total. One-line fix in `frontend/src/components/PropertyCard.tsx`: prefer total area, or show both. Quick win.
 
