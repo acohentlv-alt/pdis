@@ -202,13 +202,7 @@ export default function OpportunityPage() {
   const { data: presetsData } = useAllPresets();
   const allPresetsRaw = (presetsData?.presets ?? []) as Record<string, unknown>[];
   const allPresets = useMemo(
-    () => allPresetsRaw.filter(p => {
-      if (!((p.is_active as boolean) ?? true)) return false;
-      const extra = (p.extra_params as Record<string, unknown> | null) ?? {};
-      const src = extra.source as string | undefined;
-      if (src === 'facebook') return false;
-      return true;
-    }),
+    () => allPresetsRaw.filter(p => (p.is_active as boolean) ?? true),
     [allPresetsRaw]
   );
 
