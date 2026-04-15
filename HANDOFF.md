@@ -1,4 +1,79 @@
-# HANDOFF — April 15, 2026 (late2 session + late session + consolidation session + evening session + night session)
+# HANDOFF — April 15, 2026 (night2 + late2 + late + consolidation + evening + night sessions)
+
+## NIGHT2 SESSION (Alan + opus, past-midnight into Apr 16)
+
+### What we did today
+
+Marathon session that turned into a full-system health check. **Ten commits pushed to main** — ending the day with `0b16f95`.
+
+**FB pipeline overhaul, end to end:**
+1. Found the phantom-reset migration bug in `database.py` that was wiping `ingest_state.last_ok_at` on every cold start — fixed.
+2. Shipped FB cross-source dedup (Briefs A+B): floor extraction, phone normalization at ingest, narrowed migration WHERE, new `find_fb_cross_source_matches()` with Tier 10/11/12 + floor veto + rooms veto + Hebrew street normalizer. 237 LOC in matching.py.
+3. Diagnosed three separate FB data-quality problems in sequence — FB rows had `source='yad2'` (migration bug), non-property posts got ingested (Haiku's `intent` field wasn't in the Pydantic model so FastAPI dropped it), and 665 of 689 FB rows were falsely flagged as removed (sampling ingest got treated as exhaustive sweep). All fixed.
+4. Alan flipped `YAD2_VM_INGESTION_ENABLED=true` on Render mid-session; the VM Yad2 scraper I deployed tonight immediately started POSTing HTTP 200s.
+5. Open Search was failing with "Scan failed" — diagnosed as Render IP blocked by Yad2. Alan pushed back: "it shouldn't scrape, query the existing DB." Fixed — `/api/scan/open` now persists criteria and returns; SearchResultsPage queries the filtered DB via the existing city-scoped endpoint.
+
+**Yad2 VM deploy — real infra work, not just code:**
+- Created `/opt/pdis-yad2-scraper/` on Oracle VM, scp'd `run_yad2.py` + `run_yad2.sh` + `.env`.
+- Installed systemd service + timer (08:04 IDT daily). First gotcha: unit was missing `User=ubuntu`, ran as root, curl_cffi unavailable. Fixed.
+- Second gotcha: `run_yad2.py` was forsale-only; extended to handle rent+forsale. Also removed the `category != 'forsale'` check in `/api/ingest/yad2` route.
+- Tonight's manual fire proved end-to-end: 1000+ listings scraped across 5 presets, all POSTed HTTP 200. DB now shows 3 fresh sessions (s152 TLV Rent Full Scan 240/223new, s153 Haifa Buildings 240/50new, s154 Florentin Buy Amit 240/91new).
+
+**UI fixes:**
+- FB preset now shows as a pill (`a05c9b0`) — removed the `src==facebook` exclusion.
+- FB preset view source-scoped (`759823f`) — `/api/presets/{id}/properties` narrows to `source='facebook'` when viewing a FB preset. Was bleeding Yad2+Madlan rows.
+
+**Data cleanup:**
+- 736 broken FB rows repaired: `source='yad2' → 'facebook'`, phones re-normalized (216 kept, 11 NULLed).
+- 103 junk FB rows deleted (no price/rooms/sqm = Haiku found nothing).
+- 665 FB rows reactivated (false-removal sweep).
+- Created Madlan preset 44 (`TLV Rent - Madlan`) — first scrape ingested 1190 listings / 959 new.
+
+### Commits pushed this session
+
+- `95da8c3` Fix FB ingest health: stop nuking last_ok_at on every startup
+- `fb8b382` Sync CLAUDE.md: remove govmap-derived signals, document Apify/Haiku FB pipeline
+- `4773304` FB cross-source dedup: data fidelity + matcher (Brief A+B)
+- `e8b2ba1` Extend Yad2 VM scraper to handle rent + forsale (unblocks Render)
+- `e5d2022` Fix Yad2 VM service: run as ubuntu, not root
+- `a05c9b0` Show Facebook preset as a pill in OpportunityPage
+- `759823f` Fix FB preset view: return FB-source rows only
+- `c20fbd0` FB ingest: reject non-property / low-confidence / wanted posts
+- `ca608dc` Disable FB removal-detection sweep (sampling ingest is not exhaustive)
+- `0b16f95` Open Search: query existing DB instead of triggering a scrape
+
+### What's half-done / needs attention
+
+- **Open Search UX on next-page (SearchResultsPage).** Backend now returns 846 TLV-rent-2.5-6K matches instantly. UI was built assuming scrape-then-browse — with instant query, UX needs a plan. **Alan explicitly asked for a brief here before any more code. Queue `/plan` first thing next session.**
+- **FB city bleed** — Kfar Saba posts still get labeled TLV because the VM hardcodes `GROUP_CITY_MAP`. Two fix options in TASKS.md — Alan's call.
+- **Preset 9 "Haifa Buy" HTTP 500** from VM ingest — `is_active=False` preset somehow still gets scraped + POSTed. Low priority; `run_yad2.py` filter may not be catching falsy is_active values.
+- **Working tree has `vm-scraper/run.py`** modified by parallel agent — left untouched per rule. The parallel agent's PresetManager redesign files are all committed already (`c66e7b7` + `508cada`).
+
+### What to do next
+
+1. **Run `/plan` for the SearchResultsPage / Open Search UX rework** — Alan's explicit ask. Existing UI assumed scrape flow; now we have instant results.
+2. **Verify tomorrow morning's automated runs land cleanly** — 08:04 IDT Yad2 VM + 10:00 IDT FB Apify. Check scan_sessions.
+3. **Manual iPhone QA** on the shipped work still AWAITING QA (PresetManager redesign, filter drawer polish, scan-button progress bar).
+4. **Decide FB city bleed fix** — quick filter-on-neighborhood vs thoughtful `fb_groups.default_city` column.
+5. **Monday: strategic item #1 — Telemetry (2h).** Blocks the rest of the 7 strategic bets.
+
+### Watch out for
+
+- **`YAD2_PHONE_FETCH_ENABLED=false`** still on Render — Brief #2 phone fetcher deployed but gated. Flip when ready.
+- **VM Yad2 scraper runs at 08:04 IDT daily** — do not manually kick off `/api/scan/scheduled` for Yad2 presets (Render IP blocked). Let the VM timer run it.
+- **FB ingest pipeline now has THREE filters:** (1) Haiku classifies intent, (2) server rejects `intent not in ('rent','sale')`, (3) server rejects `confidence < 0.3`. Daily FB row count will be meaningfully smaller than raw Apify output.
+- **Open Search creates a disabled preset row** each submit, accumulating. No auto-cleanup. Manual delete from `search_presets where is_active=false and created_at > N days` if clutter bothers you later.
+- **Removal detection on FB is OFF.** FB rows stay `is_active=TRUE` forever. If a post actually gets removed from FB, we won't catch it. Acceptable tradeoff for sampling ingest.
+
+### Test these
+
+- Hard-refresh `https://pdis-lsah.onrender.com` after Render finishes the `0b16f95` deploy (~3-5 min post-push).
+- Tap "TLV Rent - Facebook" pill → **689 FB properties**, no Yad2 clutter.
+- Search tab → `TLV / Rent / 2500-6000₪` → **846 matches**, no "Scan failed" error.
+- After 08:04 IDT tomorrow: dashboard "Last scan" on each Yad2 preset should flip from "blocked" to "done".
+- After 10:00 IDT tomorrow: FB count grows modestly (~50-70 new posts), no LED lamps / non-property junk.
+
+---
 
 ## LATE2 SESSION (PresetManager redesign + product analysis + 7 strategic items queued)
 

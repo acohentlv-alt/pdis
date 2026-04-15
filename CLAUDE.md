@@ -271,9 +271,9 @@ FastAPI matches routes top-to-bottom. Path parameter routes (`{preset_id}`, `{ya
 
 | Source | Runs on | Reason |
 |--------|---------|--------|
-| Yad2 rent | Render | `/realestate/rent` not blocked; curl_cffi Chrome impersonation works from Render IP |
+| Yad2 rent | Oracle VM (`vm-scraper/run_yad2.py`) | `/realestate/rent` got blocked from Render IP ~2026-04-15; moved to VM with forsale, daily 08:04 IDT systemd timer |
 | Madlan | Render | PerimeterX cookie enough; no browser needed |
-| Yad2 forsale | Oracle VM (`vm-scraper/run_yad2.py`) | `/forsale` IP-blocked by ShieldSquare on Render |
+| Yad2 forsale | Oracle VM (`vm-scraper/run_yad2.py`) | `/forsale` IP-blocked by ShieldSquare on Render; same script handles both rent + forsale since 2026-04-15 |
 | Facebook Groups | Apify (cloud) + Oracle VM orchestrator | Apify scrapes via residential proxies; VM systemd timer triggers daily at 10:00 IDT |
 | Govmap backfill | Oracle VM (`vm-scraper/run_govmap.py`) | Long-running backfill, tmux/persistent disk |
 
