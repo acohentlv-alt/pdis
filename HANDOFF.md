@@ -1,4 +1,61 @@
-# HANDOFF — April 15, 2026 (late session + consolidation session)
+# HANDOFF — April 15, 2026 (late session + consolidation session + evening session)
+
+## EVENING SESSION (after consolidation — the FB Groups U-turn)
+
+### What we did
+
+Started by killing the abandoned laptop-daemon pivot (stashed as `stash@{0}`) and ran the planner→reviewer→exec cycle for the original A2 brief (Oracle VM + Smartproxy/Decodo residential proxy). Shipped 5 commits: A2 deployment code, fix to `TLV_CITY_STRING` (was hyphen, prod uses space), PropertyCard fallback for FB posts without phones (shows "Message on Facebook" link), full pivot to Apify+Haiku replacing Playwright entirely, and skip-known LLM optimization with street/house extraction.
+
+**The U-turn:** halfway through, Playwright scraping seemed broken (~1 post per group from the FB DOM). Recommended parking. Alan pushed back. A diagnostic agent proved scraping IS viable — earlier failure was a too-aggressive modal-dismiss loop + outdated `_parse_post` selectors, NOT FB anti-bot. By that point we'd already spent $4.55 testing Apify with 14 groups × 65 posts/group = 910 posts and saw it just works. Pivoted to Apify instead of fixing Playwright.
+
+**Final architecture (live):**
+- Apify actor `apify/facebook-groups-scraper` runs daily 10:00 IDT via Oracle VM systemd timer
+- 14 active TLV groups × 5 posts each = 70 posts/day
+- Claude Haiku 4.5 extracts structured fields from Hebrew text (intent, price, sqm, rooms, phone, neighborhood, street/house, is_agent, amenities, available_date)
+- Skip-known LLM via new endpoint `/api/ingest/facebook/existing-ids` (cuts Haiku cost ~50% over time)
+- POST batches to `/api/ingest/facebook` → existing scan pipeline upserts properties + runs matching/signals
+- 738 posts already in DB from a one-shot Apify backfill
+
+**Cost:** ~$5.80/mo Apify (after $5/mo free credit) + ~$1.80/mo Haiku = **~$7.60/mo**. Decodo proxy cancelled (Apify provides residential proxies internally).
+
+### Commits pushed this session
+
+- `73f361e` A2: FB Groups scraper path-to-production
+- `ee66dbc` Park FB Groups scraping (later reversed in spirit, not in commit history)
+- `74ff868` Fix TLV_CITY_STRING to canonical (space, not hyphen)
+- `ddf8f02` PropertyCard: FB fallback — show Message-on-Facebook link when no phone
+- `40a749b` FB Groups via Apify + Haiku (replacing Playwright pivot)
+- `b636598` FB ingest: skip-known LLM optimization + street/house extraction
+
+### What's half-done
+
+- **Cross-source FB↔Yad2/Madlan dedup not yet implemented.** Alan asked for "if same address+floor". Currently `pdis/matching.py` only matches via Haversine distance (lat/lon), and FB posts have NO coordinates from Apify. We extracted street_address + house_number via Haiku and they flow to `properties` now, but no matcher uses them yet. Brief printed in conversation transcript: add `find_fb_cross_source_matches()` helper that matches via phone, then street+house+floor+neighborhood, then soft heuristics. Estimated 1-2 hours, do it tomorrow morning AFTER the 10:00 scan runs so we have fresh data to test against.
+- **`ingest_state.last_ok_at` is NULL despite 738 successful POSTs.** Either `_reset_fb_warning_counter()` isn't being called on the success path, or something silently failed. Worth investigating before tomorrow's go-live.
+- **Working tree has 13 modified + 4 untracked files from other agents.** Deliberately not staged. Includes new files like `frontend/src/components/PullToRefresh.tsx`, `FilterDrawer.tsx`, `lib/toast.tsx`, `pdis/yad2_phone.py`. Review and decide before next commit.
+
+### What to do next
+
+1. **Watch the 10:00 IDT scheduled run live.** SSH to VM and `tail -f /var/log/pdis-fb-scraper.log` around 10:01. Confirm it triggers Apify → fetches → LLM-parses (skipping known) → POSTs → properties land.
+2. **Investigate `ingest_state.last_ok_at` NULL bug.** Read `_reset_fb_warning_counter` call site in `pdis/api/routes.py`, see why it's not firing. Should update on every successful ingest.
+3. **Plan + ship FB cross-source dedup** (the brief above). Use `/plan` since matching.py is sensitive.
+4. **TASKS.md TODO items:** FilterBar Facebook source dropdown option, per-group city overrides for non-TLV posts that slip through.
+
+### Watch out for
+
+- **Apify pricing nuance.** $5 is a MONTHLY free credit, not a flat subscription. With `resultsLimit=5` × 14 groups daily we use ~$10.80/mo gross, $5.80 net out of pocket. If Alan wants strictly free, drop `RESULTS_PER_GROUP=2` in VM `.env` (28 posts/day, fits free tier).
+- **VM cleanup deferred.** `~/.cache/ms-playwright` (622MB Chromium binary), `state.json` (FB cookies), old `run.py` (Playwright scraper), `fb_diag.py` all unused now. Cleanup punch list in the brief above. Also `pdis/utils/` cache dir was orphaned during the stash earlier.
+- **Anthropic + Apify keys are visible in this conversation transcript.** Alan should rotate the Anthropic key after this session if paranoid (it has billing access). Apify key is lower-risk.
+- **2 batches failed during initial backfill** (500 errors on Render — probably transient). 80 posts kept their first-pass field values. Will heal on next daily scan.
+- **Don't trust matching.py to dedup FB posts cross-source yet.** Existing logic is coordinate-based; FB has no coordinates. Cards may show duplicates between FB and Yad2/Madlan until the new matcher is built.
+- **Stash `stash@{0}` (`laptop-daemon-pivot-20260415-abandoned`) still exists.** Has `pdis/utils/city.py` and abandoned LLM-parse code. Probably safe to drop after a final review.
+
+### Test these
+
+- After 10:00 scheduled run: `curl https://pdis-lsah.onrender.com/api/properties?source=facebook&limit=50` — count should be > 738
+- After scheduled run: `curl https://pdis-lsah.onrender.com/api/ingest/facebook/health` — `last_ok_at` should be today's date (not NULL — currently buggy)
+- Open https://pdis-lsah.onrender.com on mobile, source filter "Facebook" — confirm cards show neighborhoods, prices, sqm, "Message on Facebook" links where phone is missing
+
+---
 
 ## CONSOLIDATION SESSION (Alan + second agent, after "late session")
 
