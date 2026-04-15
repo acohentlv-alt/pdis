@@ -1,0 +1,12 @@
+[Unit]
+Description=PDIS Yad2 scraper (rent + forsale)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/pdis-yad2-scraper
+ExecStart=/opt/pdis-yad2-scraper/run_yad2.sh
+EnvironmentFile=/opt/pdis-yad2-scraper/.env
+StandardOutput=append:/var/log/pdis-yad2-scraper.log
+StandardError=append:/var/log/pdis-yad2-scraper.log

@@ -491,20 +491,20 @@ def main():
     presets = fetch_presets()
     log.info(f"Fetched {len(presets)} total presets from backend")
 
-    # Filter to forsale + active + source=yad2 (or unset)
-    forsale_presets = [
+    # Filter to active Yad2 presets (both rent and forsale — /rent is now blocked on Render too)
+    yad2_presets = [
         p for p in presets
-        if p.get("category") == "forsale"
+        if p.get("category") in ("forsale", "rent")
         and p.get("is_active") is True
         and (p.get("extra_params") or {}).get("source", "yad2") in (None, "yad2")
     ]
-    log.info(f"Forsale+active+yad2 presets: {len(forsale_presets)}")
+    log.info(f"Active Yad2 presets (rent+forsale): {len(yad2_presets)}")
 
-    if not forsale_presets:
-        log.info("No forsale presets to scrape — exiting")
+    if not yad2_presets:
+        log.info("No Yad2 presets to scrape — exiting")
         return
 
-    for i, preset in enumerate(forsale_presets):
+    for i, preset in enumerate(yad2_presets):
         preset_id = preset["id"]
         try:
             listings = scrape_preset_forsale(preset)
@@ -520,7 +520,7 @@ def main():
             log.error(f"[preset {preset_id}] Unexpected error: {exc}")
 
         # Delay between presets (skip after last one)
-        if i < len(forsale_presets) - 1:
+        if i < len(yad2_presets) - 1:
             delay = random.uniform(PRESET_DELAY_MIN, PRESET_DELAY_MAX)
             log.info(f"Waiting {delay:.0f}s before next preset")
             time.sleep(delay)

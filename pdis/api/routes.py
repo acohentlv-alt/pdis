@@ -2335,8 +2335,6 @@ async def yad2_ingest(request: Request, body: Yad2IngestBody):
         raise HTTPException(status_code=404, detail=f"Preset {body.preset_id} not found")
     if not preset["is_active"]:
         raise HTTPException(status_code=400, detail=f"Preset {body.preset_id} is not active")
-    if preset["category"] != "forsale":
-        raise HTTPException(status_code=400, detail=f"Preset {body.preset_id} is not forsale")
 
     listings: list[ScrapedListing] = []
     for item in body.listings:
