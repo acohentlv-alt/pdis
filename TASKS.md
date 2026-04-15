@@ -12,44 +12,9 @@ Shipped but needs manual test in deployed environment after Render auto-deploy:
 - Last-scan line per preset (`Xm ago · N listings` / `Never scanned` / red `failed` / amber `blocked`)
 - Error banner surfaces readable messages
 
-### FB groups multi-select UI
-Hard-refresh browser then edit FB preset → verify 49 checkboxes appear, tick relevant ones, save, reopen → persistence check.
-
 ---
 
-## READY TO RUN (Alan's hands, ~30-45 min)
-
-### FB VM scraper deployment — A2 brief drafted, awaiting /review and /exec
-Investigation Apr 15 (late session) confirmed three stacked off-switches: feature flag default-False, empty fb_groups linkage on the active preset, scraper never ran. Planner produced a full A2 brief (in conversation transcript, planner agent `ab7b1cef88493c91a`).
-
-Brief summary:
-- **New:** `pdis/utils/city.py` with `normalize_city()` supporting 6 TLV variants (Hebrew with/without hyphen, English variants → canonical `"תל אביב יפו"`)
-- **Remove:** `TLV_CITY_STRING` + `GROUP_CITY_MAP` from `routes.py:2057-2065`; delete `scripts/enumerate_fb_groups.py`; re-point `seed_fb_groups.py` at `vm-scraper/groups.json`
-- **Harden:** `vm-scraper/run.py` — new `--dry-run` flag, selector-drift detection, hard-fail when `PROXY_URL` missing (no warn-and-proceed)
-- **Schedule:** systemd timer (Alan picked over cron) with `OnCalendar=*-*-* 08:00:00`, `RandomizedDelaySec=300`, `Restart=on-failure RestartSec=600 StartLimitBurst=2`
-- **Probation:** `FB_SCANS_PER_DAY=1` for 14 days, then flip to 2
-
-Open decisions before `/exec`:
-1. **Proxy vendor** — Smartproxy ~$5–15/mo recommended (lowest-cost legit residential). Alan said "gold standard for free" — flagged as not possible; alternatives are Bright Data (~$15–45/mo) or no proxy (high FB ban risk on Oracle VM IP).
-2. **Retroactive city normalization** of 1,952 existing `properties.address_city` rows. Alan said "every point of data needs to be accurate" → likely yes; planner didn't include the migration in the printed brief, needs to be added before `/exec`.
-
-Prereqs Alan owns: buy proxy → prep FB account (member of 5 TLV groups + 2FA on) → verify VM SSH → set Render env (`FB_INGESTION_ENABLED=false`, `FB_SCANS_PER_DAY=1`).
-
-Then: `/review` → `/exec` → manual dry-run on VM → install systemd timer → flip flag.
-
----
-
-## FB UX POLISH (post-A2 follow-ups)
-
-### FilterBar — Facebook source option missing
-`frontend/src/components/FilterBar.tsx:124-126` only offers "All sources / Yad2 / Madlan". Once FB ingestion is live, add `<option value="facebook">Facebook</option>`. "All sources" already includes FB rows, so this is dropdown-only UX.
-
-### Apply `normalize_city()` across Yad2/Madlan ingest + filters
-After A2 ships and the canonical is proven stable, extend the normalizer to:
-- `pdis/scraper.py:182` — Yad2 `item.get("city")` on ingest
-- `pdis/scraper_madlan.py:250` — Madlan `addr.get("city")`
-- Any route that filters `properties.address_city` by string equality
-Goal: one canonical value per city across all sources.
+## READY TO RUN (Alan's hands)
 
 ### Govmap full backfill — re-run with fixed scraper to cover full TLV + Haifa
 
@@ -140,13 +105,6 @@ Planned but not coded. Remove `below_closed_comps` / `above_closed_comps_20pct` 
 ### Phone numbers — still broken
 - Madlan: scraper reads `poc.displayNumber` but 0/713 properties get one. Broken or API changed.
 - Yad2: requires separate click-to-reveal API call (not wired).
-- FB: works once FB ingest is flowing (depends on deployment above).
-
-### FB Groups Brief #2 (re-plan after 1 week of real FB data)
-FB-aware dedup, new FB-specific signals (no-broker badge, multi-group cross-post = high distress), Nominatim geocoding pass for neighborhoods.
-
-### FB Groups Brief #3
-Source filter dropdown, "Hide brokers" toggle, "Report this listing" link.
 
 ### Telegram bot for scan alerts
 Send alerts when notable properties found after a scan completes.
@@ -158,24 +116,41 @@ Depends on full-city govmap backfill (in progress) + Amit providing thresholds f
 
 ## PARKED
 
+### FB Groups scraping — PARKED 2026-04-15 (abandoned after two failed bring-up attempts)
+
+**Decision:** Kill direct FB Groups scraping. Ship PDIS on Yad2 + Madlan + govmap only. Revisit only if we're willing to pay a commercial vendor ($30–100/mo) for maintained selectors.
+
+**What's deployed but disabled:**
+- Oracle VM at `/opt/pdis-fb-scraper/` — full scraper code, Decodo residential proxy wired, FB cookies loaded, systemd unit files installed
+- `pdis-fb-scraper.timer` disabled (`systemctl disable` run 2026-04-15) — does not fire
+- Render: `FB_INGESTION_ENABLED=true` (left as-is, endpoint just sits idle with no VM feeder)
+- DB migration seeded `extra_params.fb_groups` on FB-source presets (harmless even when scraper is off)
+- `fb_groups` table has 49 groups seeded; 14 are `is_active=TRUE`
+- FB-source preset in `search_presets` still active — will show no listings, which is correct
+
+**Root cause (confirmed by two independent agents 2026-04-15):**
+- `mbasic.facebook.com` deprecated — redirects to `www.facebook.com`
+- `m.facebook.com` page loads but content hydrates behind JS; `article`/`role="article"` selectors return 0 matches
+- `www.facebook.com` renders empty skeleton `<article>` elements; real post content loads into **obfuscated CSS classes that rotate weekly** (per Meta's anti-scraping posture)
+- No stable selector path exists for Playwright + cookies today
+- Verified live against 14 TLV rental groups with valid FB session cookies (c_user/xs/datr all present) — zero posts extractable across all URL variants
+
+**Sunk costs:** ~2 days of planning + agent work across two sessions. Decodo trial signed up (no recurring charge yet).
+
+**To resurrect (when/if):**
+1. Pick a commercial vendor: Apify (~$30–100/mo, pay-per-run), ScrapFly ($30–100/mo), BrightData Facebook Dataset (per-row pricing). They maintain selectors.
+2. Rewrite `vm-scraper/run.py` to call vendor API instead of Playwright. Keep `/api/ingest/facebook` endpoint — it's a stable target.
+3. Re-enable the systemd timer: `sudo systemctl enable --now pdis-fb-scraper.timer`
+4. FB UX polish tasks below become relevant again.
+
+**FB UX polish (parked — only relevant if FB Groups resurrects):**
+- FilterBar dropdown: add `<option value="facebook">Facebook</option>` in `frontend/src/components/FilterBar.tsx:124-126`
+- `is_agent` broker flag plumbing: `FacebookPost` model (`pdis/api/routes.py:2068-2083`) → `_fb_post_to_listing` (`pdis/api/routes.py:2125-2160`) → `ScrapedListing` → `properties`. Currently dropped silently by Pydantic default `extra='ignore'`.
+- FB Brief #2: FB-aware dedup, new FB-specific signals (no-broker badge, multi-group cross-post = high distress), Nominatim geocoding for neighborhoods
+- FB Brief #3: source filter dropdown, "Hide brokers" toggle, "Report this listing" link
+- LLM post-parsing via Haiku (~$0.10/mo) for freeform Hebrew — stash reference in abandoned laptop-daemon pivot
+- `normalize_city()` helper in `pdis/utils/city.py` (stashed) — was FB-motivated; no current need
+- Cleanup if never resurrected: delete `/opt/pdis-fb-scraper/` from VM, delete `vm-scraper/` from repo, drop `fb_groups` + `ingest_state.facebook` rows, remove `/api/ingest/facebook` route, remove FB-source presets
+
 ### FB Marketplace integration
-Different from FB Groups (which we shipped). Needs Playwright + perceptual image hashing. Revisit after FB Groups pipeline is proven.
-
----
-
-## POST-A2 BACKLOG
-
-### Brief #2 — FB UX Polish
-Plumb `is_agent` (broker flag) through `FacebookPost` model (pdis/api/routes.py:2068-2083)
-→ `_fb_post_to_listing` (pdis/api/routes.py:2125-2160) → `ScrapedListing` → `properties`
-so FB broker-vs-private is visible in the UI. Currently dropped silently by Pydantic
-(extra='ignore' default). Parser emits it at vm-scraper/run.py:297 but server never sees it.
-
-### LLM post-parsing (deferred)
-FB posts are freeform Hebrew text; regex misses neighborhood/intent/move-in-date/broker
-cues. After A2 flows real data for 1-2 weeks, ship Haiku-based structured extraction
-(~$0.10/mo). Stash reference: see end-session Apr 15 archive.
-
-### Operational: stagger govmap backfill (post-A2)
-If 1GB VM RAM is tight at 10:00 when FB scraper + govmap backfill overlap, pause
-govmap cron 09:55-10:10.
+Different from FB Groups. Needs Playwright + perceptual image hashing. Blocked by the same Meta-scraping wall as FB Groups — revisit only under the commercial-vendor decision above.
