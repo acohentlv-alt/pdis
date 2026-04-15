@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { useOpenSearchPresets, usePropertiesByPreset, useFavoriteIds, useWhitelistIds, useBlacklistIds } from '../api/queries';
+import { useOpenSearchPresets, usePresetProperties, useFavoriteIds, useWhitelistIds, useBlacklistIds } from '../api/queries';
 import { useAddFavorite, useRemoveFavorite, useWhitelist, useRemoveWhitelist, useBlacklist, useRemoveBlacklist } from '../api/mutations';
 import FilterBar from '../components/FilterBar';
 import PropertyCard from '../components/PropertyCard';
@@ -66,7 +66,7 @@ export default function SearchResultsPage() {
   }, [keyword]);
 
   const { data: presetsData, isLoading: presetsLoading } = useOpenSearchPresets();
-  const { data: propertiesData, isLoading: propsLoading } = usePropertiesByPreset(selectedPresetId);
+  const { data: propertiesData, isLoading: propsLoading } = usePresetProperties(selectedPresetId);
   const { data: favIdsData } = useFavoriteIds();
   const { data: whitelistData } = useWhitelistIds();
   const { data: blacklistData } = useBlacklistIds();

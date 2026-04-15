@@ -714,6 +714,9 @@ class OpenSearchBody(BaseModel):
 
 @router.post("/api/scan/open")
 async def trigger_open_scan(body: OpenSearchBody):
+    """Creates a saved-search preset; does NOT scrape Yad2. Results come from the
+    existing DB — SearchResultsPage queries /api/presets/{id}/properties which
+    filters by city + category + price + rooms across all already-ingested rows."""
     async with _db.pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -734,15 +737,7 @@ async def trigger_open_scan(body: OpenSearchBody):
             row = await cur.fetchone()
         await conn.commit()
 
-    preset_id = row["id"]
-
-    try:
-        result = await run_scan(preset_id)
-    except Exception as exc:
-        logger.error("api.open_scan_error", preset_id=preset_id, error=str(exc))
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    return result
+    return {"status": "done", "preset_id": row["id"]}
 
 
 async def _run_scan_background(preset_id: int) -> None:
