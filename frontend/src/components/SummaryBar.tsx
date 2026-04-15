@@ -21,12 +21,16 @@ function StatCard({ label, value, onClick, active, colorClass = 'text-gray-900',
   return (
     <div
       onClick={onClick}
-      className={`flex-1 basis-0 rounded-lg shadow py-3 px-1 flex flex-col items-center justify-center ${
-        onClick ? 'cursor-pointer hover:shadow-md transition-all' : ''
-      } ${active ? activeColorClass : 'bg-white'}`}
+      className={`flex-1 basis-0 rounded-2xl py-4 px-2 flex flex-col items-center justify-center transition-all ${
+        onClick ? 'cursor-pointer active:scale-[0.97]' : ''
+      } ${
+        active
+          ? `${activeColorClass} shadow-lg shadow-gray-900/20`
+          : 'bg-white shadow-sm border border-gray-100 hover:border-gray-300 hover:shadow-md'
+      }`}
     >
-      <div className={`text-xl font-bold ${active ? 'text-white' : colorClass}`}>{value}</div>
-      <div className={`text-[10px] leading-tight mt-1 ${active ? 'text-gray-300' : 'text-gray-500'}`}>{label}</div>
+      <div className={`text-2xl font-bold tracking-tight tabular-nums ${active ? 'text-white' : colorClass}`}>{value}</div>
+      <div className={`text-[10px] uppercase tracking-wider font-semibold leading-tight mt-1 ${active ? 'text-white/70' : 'text-gray-500'}`}>{label}</div>
     </div>
   );
 }

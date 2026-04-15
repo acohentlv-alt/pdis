@@ -525,6 +525,11 @@ async def run_migrations() -> None:
                 "ALTER TABLE scan_sessions ADD COLUMN IF NOT EXISTS progress INTEGER DEFAULT 0"
             )
 
+            # Yad2 phone fetch: cooldown bookkeeping for the per-listing customer endpoint
+            await cur.execute(
+                "ALTER TABLE properties ADD COLUMN IF NOT EXISTS phone_fetch_attempted_at TIMESTAMPTZ"
+            )
+
             # Cleanup migrations — idempotent, removes stale columns/indexes
             await cur.execute("DROP INDEX IF EXISTS idx_classifications_score")
             await cur.execute("ALTER TABLE property_classifications DROP COLUMN IF EXISTS distress_score")

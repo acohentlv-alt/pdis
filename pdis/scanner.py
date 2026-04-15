@@ -457,6 +457,118 @@ async def _cache_madlan_years(listings: list[ScrapedListing]) -> None:
     logger.info("scanner.madlan_years_cached", count=len(rows))
 
 
+async def _yad2_phone_scan_hook(session_id: int) -> None:
+    """Fetch Yad2 phones for listings in this session that are either new-this-session
+    or already carry any distress signal AND have no phone yet. Capped per scan.
+    Runs AFTER persist_signals_batch so property_classifications is populated.
+    Never raises — log-only on failure.
+    """
+    if not settings.yad2_phone_fetch_enabled:
+        return
+    from pdis.yad2_phone import fetch_phones
+    cap = settings.yad2_phone_scan_cap
+    cooldown = settings.yad2_phone_retry_cooldown_days
+    try:
+        async with _db.pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """SELECT p.yad2_id
+                       FROM properties p
+                       JOIN property_snapshots ps ON ps.property_id = p.id
+                       LEFT JOIN property_classifications pc ON pc.property_id = p.id
+                       WHERE ps.session_id = %s
+                         AND p.source = 'yad2'
+                         AND p.contact_phone IS NULL
+                         AND (p.phone_fetch_attempted_at IS NULL
+                              OR p.phone_fetch_attempted_at < NOW() - make_interval(days => %s))
+                         AND (
+                              p.first_seen >= (SELECT started_at::date FROM scan_sessions WHERE id = %s)
+                              OR (pc.signal_details IS NOT NULL
+                                  AND (jsonb_array_length(COALESCE(pc.signal_details->'strong_signals','[]'::jsonb)) > 0
+                                    OR jsonb_array_length(COALESCE(pc.signal_details->'weak_signals','[]'::jsonb)) > 0))
+                         )
+                       ORDER BY
+                         CASE WHEN p.first_seen >= (SELECT started_at::date FROM scan_sessions WHERE id = %s)
+                              THEN 0 ELSE 1 END,
+                         p.last_seen DESC
+                       LIMIT %s""",
+                    (session_id, cooldown, session_id, session_id, cap),
+                )
+                tokens = [r["yad2_id"] for r in await cur.fetchall()]
+    except Exception as exc:
+        logger.warning("yad2_phone.select_failed", error=str(exc))
+        return
+
+    if not tokens:
+        return
+
+    logger.info("yad2_phone.scan_fetching", count=len(tokens))
+    phones = await fetch_phones(tokens)
+    filled = await _persist_yad2_phones(phones, tokens)
+    logger.info("yad2_phone.scan_done", attempted=len(tokens), filled=filled)
+
+
+async def _yad2_phone_backfill() -> None:
+    """Drain the historical backlog of null-phone Yad2 properties (any status,
+    including blacklisted). Runs at the tail of run_all_scans. 7-day cooldown
+    applies uniformly to both 'no phone returned' and 'blocked'.
+    """
+    if not settings.yad2_phone_fetch_enabled:
+        return
+    from pdis.yad2_phone import fetch_phones
+    limit = settings.yad2_phone_backfill_batch_size
+    cooldown = settings.yad2_phone_retry_cooldown_days
+    try:
+        async with _db.pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """SELECT yad2_id FROM properties
+                       WHERE source = 'yad2'
+                         AND contact_phone IS NULL
+                         AND (phone_fetch_attempted_at IS NULL
+                              OR phone_fetch_attempted_at < NOW() - make_interval(days => %s))
+                       ORDER BY last_seen DESC, id ASC
+                       LIMIT %s""",
+                    (cooldown, limit),
+                )
+                tokens = [r["yad2_id"] for r in await cur.fetchall()]
+    except Exception as exc:
+        logger.warning("yad2_phone.backfill_select_failed", error=str(exc))
+        return
+
+    if not tokens:
+        return
+
+    logger.info("yad2_phone.backfill_fetching", count=len(tokens))
+    phones = await fetch_phones(tokens)
+    filled = await _persist_yad2_phones(phones, tokens)
+    logger.info("yad2_phone.backfill_done", attempted=len(tokens), filled=filled)
+
+
+async def _persist_yad2_phones(phones: dict[str, str | None], attempted: list[str]) -> int:
+    """Write phone values back. Mark ALL attempted ids with phone_fetch_attempted_at = NOW()
+    regardless of outcome, so the cooldown covers both genuine-no-phone and blocked cases.
+    Returns count of rows that got a non-null phone.
+    """
+    filled = 0
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE properties SET phone_fetch_attempted_at = NOW() WHERE yad2_id = ANY(%s)",
+                (attempted,),
+            )
+            for token, phone in phones.items():
+                if phone:
+                    await cur.execute(
+                        "UPDATE properties SET contact_phone = %s, updated_at = NOW() WHERE yad2_id = %s AND contact_phone IS NULL",
+                        (phone, token),
+                    )
+                    if cur.rowcount:
+                        filled += 1
+        await conn.commit()
+    return filled
+
+
 async def run_scan(preset_id: int) -> dict:
     """
     Run a full scan for a single preset.
@@ -589,6 +701,11 @@ async def run_scan(preset_id: int) -> dict:
         if property_ids:
             await persist_signals_batch(property_ids)
             log.info("scanner.signals_persisted", count=len(property_ids))
+
+        # Yad2 phone capture — new + signaled listings only, capped
+        if _source == "yad2":
+            await _yad2_phone_scan_hook(session_id)
+
         await _update_progress(session_id, 99)
 
         relist_count = await detect_customer_relistings(session_id)
@@ -821,6 +938,9 @@ async def run_all_scans() -> list[dict]:
         removal_count = await detect_removals(all_seen_yad2_ids, successful_preset_ids)
         if removal_count > 0:
             logger.info("scanner.removals_detected", count=removal_count)
+
+    # Drain historical Yad2 null-phone backlog
+    await _yad2_phone_backfill()
 
     return results
 

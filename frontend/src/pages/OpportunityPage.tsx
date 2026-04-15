@@ -2,12 +2,15 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import SummaryBar from '../components/SummaryBar';
 import FilterBar from '../components/FilterBar';
+import FilterDrawer from '../components/FilterDrawer';
 import PropertyCard from '../components/PropertyCard';
 import PresetManager from '../components/PresetManager';
+import PullToRefresh from '../components/PullToRefresh';
 import { usePresetProperties, useAllPresets, useAmitFitProperties, useFavoriteIds, useWhitelistIds, useBlacklistIds, useScanStatus } from '../api/queries';
 import { useAddFavorite, useRemoveFavorite, useWhitelist, useRemoveWhitelist, useBlacklist, useRemoveBlacklist } from '../api/mutations';
 import { matchesPresetCriteria } from '../lib/presetMatch';
 import { signalCount } from '../lib/signalCount';
+import { useToast } from '../lib/toast';
 
 const AMIT_FIT_ID = -1;
 
@@ -70,7 +73,12 @@ function applyFilters(
   sortBy: string,
   keyword: string,
   minPriceSqm: string,
-  maxPriceSqm: string
+  maxPriceSqm: string,
+  minPrice: string,
+  maxPrice: string,
+  minSqm: string,
+  maxSqm: string,
+  signalFilters: string[]
 ): Record<string, unknown>[] {
   let result = [...items];
 
@@ -115,6 +123,27 @@ function applyFilters(
     });
   }
 
+  // Price range
+  const minP = minPrice !== '' ? Number(minPrice) : null;
+  const maxP = maxPrice !== '' ? Number(maxPrice) : null;
+  if (minP !== null) result = result.filter(i => (i.price as number ?? 0) >= minP);
+  if (maxP !== null) result = result.filter(i => (i.price as number ?? Infinity) <= maxP);
+
+  // Sqm range
+  const minS = minSqm !== '' ? Number(minSqm) : null;
+  const maxS = maxSqm !== '' ? Number(maxSqm) : null;
+  if (minS !== null) result = result.filter(i => ((i.square_meter_build as number) ?? (i.square_meters as number) ?? 0) >= minS);
+  if (maxS !== null) result = result.filter(i => ((i.square_meter_build as number) ?? (i.square_meters as number) ?? Infinity) <= maxS);
+
+  // Signal filter — OR semantics
+  if (signalFilters.length > 0) {
+    result = result.filter(i => {
+      const sd = (i.signal_details as { strong_signals?: string[]; weak_signals?: string[] } | null) ?? {};
+      const all = [...(sd.strong_signals ?? []), ...(sd.weak_signals ?? [])];
+      return signalFilters.some(sig => all.includes(sig));
+    });
+  }
+
   result.sort((a, b) => {
     if (sortBy === 'price') {
       return ((a.price as number) ?? 0) - ((b.price as number) ?? 0);
@@ -137,6 +166,7 @@ export default function OpportunityPage() {
   // ALL hooks must be before any early return — this is critical to avoid React error #310
 
   const queryClient = useQueryClient();
+  const toast = useToast();
 
   // Preset selection state — persisted in localStorage
   const [selectedPresetId, setSelectedPresetId] = useState<number | null>(() => {
@@ -151,10 +181,16 @@ export default function OpportunityPage() {
   const [sortBy, setSortBy] = useState('days_on_market');
   const [minPriceSqm, setMinPriceSqm] = useState('');
   const [maxPriceSqm, setMaxPriceSqm] = useState('');
+  const [minPrice, setMinPrice] = useState('');
+  const [maxPrice, setMaxPrice] = useState('');
+  const [minSqm, setMinSqm] = useState('');
+  const [maxSqm, setMaxSqm] = useState('');
+  const [signalFilters, setSignalFilters] = useState<string[]>([]);
   const [keyword, setKeyword] = useState('');
   const [debouncedKeyword, setDebouncedKeyword] = useState('');
   const [activeStatFilter, setActiveStatFilter] = useState<string | null>(null);
   const [showPresets, setShowPresets] = useState(false);
+  const [showDrawer, setShowDrawer] = useState(false);
 
   // Keyword debounce
   useEffect(() => {
@@ -225,12 +261,11 @@ export default function OpportunityPage() {
     }
   }, [allPresets, selectedPresetId]);
 
-  // Bug 3: Detect scan completion and refresh data
+  // Detect scan completion and refresh data
   const prevRunning = useRef(false);
   useEffect(() => {
     const isRunning = scanStatus?.running ?? false;
     if (prevRunning.current && !isRunning) {
-      // Scan just finished — refresh data
       queryClient.invalidateQueries({ queryKey: ['presetProperties'] });
       queryClient.invalidateQueries({ queryKey: ['presets'] });
     }
@@ -273,8 +308,12 @@ export default function OpportunityPage() {
   }, [allItems, activeStatFilter]);
 
   const filtered = useMemo(
-    () => applyFilters(rawItems, neighborhoods, selectedRooms, source, sortBy, debouncedKeyword, minPriceSqm, maxPriceSqm),
-    [rawItems, neighborhoods, selectedRooms, source, sortBy, debouncedKeyword, minPriceSqm, maxPriceSqm]
+    () => applyFilters(
+      rawItems, neighborhoods, selectedRooms, source, sortBy, debouncedKeyword,
+      minPriceSqm, maxPriceSqm, minPrice, maxPrice, minSqm, maxSqm, signalFilters
+    ),
+    [rawItems, neighborhoods, selectedRooms, source, sortBy, debouncedKeyword,
+     minPriceSqm, maxPriceSqm, minPrice, maxPrice, minSqm, maxSqm, signalFilters]
   );
 
   // Phase 2: split filtered into matching vs other based on preset criteria
@@ -295,6 +334,20 @@ export default function OpportunityPage() {
     }
     return [matching, other];
   }, [filtered, selectedPreset]);
+
+  // Active filter count (keyword + sort excluded)
+  const activeFilterCount = useMemo(() => (
+    (minPrice ? 1 : 0) +
+    (maxPrice ? 1 : 0) +
+    (minSqm ? 1 : 0) +
+    (maxSqm ? 1 : 0) +
+    (minPriceSqm ? 1 : 0) +
+    (maxPriceSqm ? 1 : 0) +
+    (neighborhoods.length > 0 ? 1 : 0) +
+    (selectedRooms.length > 0 ? 1 : 0) +
+    (source ? 1 : 0) +
+    (signalFilters.length > 0 ? 1 : 0)
+  ), [minPrice, maxPrice, minSqm, maxSqm, minPriceSqm, maxPriceSqm, neighborhoods, selectedRooms, source, signalFilters]);
 
   const greeting = (() => {
     const hour = new Date().getHours();
@@ -323,17 +376,24 @@ export default function OpportunityPage() {
   }
 
   function handleToggleWhitelist(yad2Id: string) {
-    if (whitelistIds.has(yad2Id)) removeWhitelist.mutate(yad2Id);
-    else addWhitelist.mutate(yad2Id);
+    if (whitelistIds.has(yad2Id)) {
+      removeWhitelist.mutate(yad2Id, { onSuccess: () => toast('Removed from whitelist') });
+    } else {
+      addWhitelist.mutate(yad2Id, { onSuccess: () => toast('\u2713 Whitelisted') });
+    }
   }
 
   function handleToggleBlacklist(yad2Id: string) {
-    if (blacklistIds.has(yad2Id)) removeBlacklist.mutate(yad2Id);
-    else addBlacklist.mutate(yad2Id);
+    if (blacklistIds.has(yad2Id)) {
+      removeBlacklist.mutate(yad2Id, { onSuccess: () => toast('Removed from blacklist') });
+    } else {
+      addBlacklist.mutate(yad2Id, { onSuccess: () => toast('\u2713 Blacklisted') });
+    }
   }
 
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
+      <PullToRefresh onRefresh={async () => { await queryClient.invalidateQueries({ queryKey: ['presetProperties', selectedPresetId] }); }}>
       <div className="p-4 space-y-3">
         {/* FB ingest health alert */}
         {fbHealthAlert && (
@@ -342,23 +402,33 @@ export default function OpportunityPage() {
           </div>
         )}
 
-        {/* Header: Greeting + Scan status + Refresh + Gear */}
+        {/* Header: Greeting + Scan status + Refresh + Manage searches */}
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <p className="text-lg font-semibold text-gray-900">{greeting}, Shechter</p>
+          <div className="flex items-center gap-2 min-w-0">
+            <p className="text-xl font-bold text-gray-900 tracking-tight truncate">{greeting}, Shechter</p>
             {scanStatus?.running && (
-              <span className="text-xs text-blue-500 animate-pulse">Scanning...</span>
+              <span className="text-xs text-blue-600 font-medium animate-pulse shrink-0">Scanning…</span>
             )}
           </div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => queryClient.invalidateQueries({ queryKey: ['presetProperties', selectedPresetId] })}
-              className="p-2 text-gray-500 hover:text-gray-800 text-lg"
-            >↻</button>
+          <div className="flex items-center gap-1 shrink-0">
             <button
               onClick={() => setShowPresets(true)}
-              className="p-2 text-gray-500 hover:text-gray-800 text-xl"
-            >⚙️</button>
+              className="w-10 h-10 rounded-full text-gray-500 hover:text-gray-900 hover:bg-gray-100 active:bg-gray-200 transition-colors flex items-center justify-center"
+              title="Manage searches"
+              aria-label="Manage search presets"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="4" y1="6" x2="14" y2="6" />
+                <line x1="18" y1="6" x2="20" y2="6" />
+                <circle cx="16" cy="6" r="2" />
+                <line x1="4" y1="12" x2="8" y2="12" />
+                <line x1="12" y1="12" x2="20" y2="12" />
+                <circle cx="10" cy="12" r="2" />
+                <line x1="4" y1="18" x2="16" y2="18" />
+                <line x1="20" y1="18" x2="20" y2="18" />
+                <circle cx="18" cy="18" r="2" />
+              </svg>
+            </button>
           </div>
         </div>
 
@@ -431,23 +501,14 @@ export default function OpportunityPage() {
           </div>
         )}
 
-        {/* FilterBar */}
+        {/* FilterBar — keyword + sort + Filters button */}
         <FilterBar
-          items={rawItems}
-          neighborhoods={neighborhoods}
-          setNeighborhoods={setNeighborhoods}
-          selectedRooms={selectedRooms}
-          setSelectedRooms={setSelectedRooms}
-          source={source}
-          setSource={setSource}
           sortBy={sortBy}
           setSortBy={setSortBy}
           keyword={keyword}
           setKeyword={setKeyword}
-          minPriceSqm={minPriceSqm}
-          maxPriceSqm={maxPriceSqm}
-          onMinPriceSqmChange={setMinPriceSqm}
-          onMaxPriceSqmChange={setMaxPriceSqm}
+          activeFilterCount={activeFilterCount}
+          onOpenDrawer={() => setShowDrawer(true)}
         />
 
         {/* No presets empty state */}
@@ -494,13 +555,58 @@ export default function OpportunityPage() {
             </>
           )}
           {!isLoading && matchingItems.length === 0 && otherItems.length === 0 && allPresets.length > 0 && (
-            <div className="text-center text-gray-400 py-8">No properties match your filters.</div>
+            <div className="text-center py-8">
+              <div className="text-gray-400 mb-3">No properties match your filters.</div>
+              {(activeFilterCount > 0 || activeStatFilter) && (
+                <button
+                  onClick={() => {
+                    setMinPrice(''); setMaxPrice('');
+                    setMinSqm(''); setMaxSqm('');
+                    setMinPriceSqm(''); setMaxPriceSqm('');
+                    setNeighborhoods([]); setSelectedRooms([]);
+                    setSource(''); setSignalFilters([]);
+                    setActiveStatFilter(null);
+                  }}
+                  className="text-sm text-blue-600 font-medium underline"
+                >
+                  Clear all filters
+                </button>
+              )}
+            </div>
           )}
         </div>
       </div>
+      </PullToRefresh>
 
       {/* PresetManager */}
       <PresetManager open={showPresets} onClose={() => setShowPresets(false)} />
+
+      {/* Filter Drawer */}
+      <FilterDrawer
+        open={showDrawer}
+        onClose={() => setShowDrawer(false)}
+        items={rawItems}
+        minPrice={minPrice}
+        maxPrice={maxPrice}
+        setMinPrice={setMinPrice}
+        setMaxPrice={setMaxPrice}
+        selectedRooms={selectedRooms}
+        setSelectedRooms={setSelectedRooms}
+        minSqm={minSqm}
+        maxSqm={maxSqm}
+        setMinSqm={setMinSqm}
+        setMaxSqm={setMaxSqm}
+        minPriceSqm={minPriceSqm}
+        maxPriceSqm={maxPriceSqm}
+        setMinPriceSqm={setMinPriceSqm}
+        setMaxPriceSqm={setMaxPriceSqm}
+        neighborhoods={neighborhoods}
+        setNeighborhoods={setNeighborhoods}
+        source={source}
+        setSource={setSource}
+        signalFilters={signalFilters}
+        setSignalFilters={setSignalFilters}
+      />
     </div>
   );
 }

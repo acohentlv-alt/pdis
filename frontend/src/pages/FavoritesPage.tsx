@@ -1,9 +1,13 @@
 import { useState, useMemo, useEffect } from 'react';
 import FilterBar from '../components/FilterBar';
+import FilterDrawer from '../components/FilterDrawer';
 import PropertyCard from '../components/PropertyCard';
+import PullToRefresh from '../components/PullToRefresh';
+import { useQueryClient } from '@tanstack/react-query';
 import { useFavorites, useFavoriteIds, useWhitelistIds, useBlacklistIds, useWhitelistProperties, useBlacklistProperties } from '../api/queries';
 import { useAddFavorite, useRemoveFavorite, useWhitelist, useRemoveWhitelist, useBlacklist, useRemoveBlacklist } from '../api/mutations';
 import { signalCount } from '../lib/signalCount';
+import { useToast } from '../lib/toast';
 
 type Tab = 'favorites' | 'whitelist' | 'blacklist';
 
@@ -15,7 +19,12 @@ function applyFilters(
   sortBy: string,
   keyword: string,
   minPriceSqm: string,
-  maxPriceSqm: string
+  maxPriceSqm: string,
+  minPrice: string,
+  maxPrice: string,
+  minSqm: string,
+  maxSqm: string,
+  signalFilters: string[]
 ): Record<string, unknown>[] {
   let result = [...items];
 
@@ -59,6 +68,27 @@ function applyFilters(
     });
   }
 
+  // Price range
+  const minP = minPrice !== '' ? Number(minPrice) : null;
+  const maxP = maxPrice !== '' ? Number(maxPrice) : null;
+  if (minP !== null) result = result.filter(i => (i.price as number ?? 0) >= minP);
+  if (maxP !== null) result = result.filter(i => (i.price as number ?? Infinity) <= maxP);
+
+  // Sqm range
+  const minS = minSqm !== '' ? Number(minSqm) : null;
+  const maxS = maxSqm !== '' ? Number(maxSqm) : null;
+  if (minS !== null) result = result.filter(i => ((i.square_meter_build as number) ?? (i.square_meters as number) ?? 0) >= minS);
+  if (maxS !== null) result = result.filter(i => ((i.square_meter_build as number) ?? (i.square_meters as number) ?? Infinity) <= maxS);
+
+  // Signal filter — OR semantics
+  if (signalFilters.length > 0) {
+    result = result.filter(i => {
+      const sd = (i.signal_details as { strong_signals?: string[]; weak_signals?: string[] } | null) ?? {};
+      const all = [...(sd.strong_signals ?? []), ...(sd.weak_signals ?? [])];
+      return signalFilters.some(sig => all.includes(sig));
+    });
+  }
+
   result.sort((a, b) => {
     if (sortBy === 'price') {
       return ((a.price as number) ?? 0) - ((b.price as number) ?? 0);
@@ -79,6 +109,8 @@ function applyFilters(
 }
 
 export default function FavoritesPage() {
+  const toast = useToast();
+  const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>('favorites');
   const [neighborhoods, setNeighborhoods] = useState<string[]>([]);
   const [selectedRooms, setSelectedRooms] = useState<string[]>([]);
@@ -88,6 +120,12 @@ export default function FavoritesPage() {
   const [debouncedKeyword, setDebouncedKeyword] = useState('');
   const [minPriceSqm, setMinPriceSqm] = useState('');
   const [maxPriceSqm, setMaxPriceSqm] = useState('');
+  const [minPrice, setMinPrice] = useState('');
+  const [maxPrice, setMaxPrice] = useState('');
+  const [minSqm, setMinSqm] = useState('');
+  const [maxSqm, setMaxSqm] = useState('');
+  const [signalFilters, setSignalFilters] = useState<string[]>([]);
+  const [showDrawer, setShowDrawer] = useState(false);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedKeyword(keyword), 300);
@@ -117,12 +155,18 @@ export default function FavoritesPage() {
     else addFav.mutate(yad2Id);
   };
   const handleToggleWhitelist = (yad2Id: string) => {
-    if (whitelistIds.has(yad2Id)) removeWhitelist.mutate(yad2Id);
-    else addWhitelist.mutate(yad2Id);
+    if (whitelistIds.has(yad2Id)) {
+      removeWhitelist.mutate(yad2Id, { onSuccess: () => toast('Removed from whitelist') });
+    } else {
+      addWhitelist.mutate(yad2Id, { onSuccess: () => toast('\u2713 Whitelisted') });
+    }
   };
   const handleToggleBlacklist = (yad2Id: string) => {
-    if (blacklistIds.has(yad2Id)) removeBlacklist.mutate(yad2Id);
-    else addBlacklist.mutate(yad2Id);
+    if (blacklistIds.has(yad2Id)) {
+      removeBlacklist.mutate(yad2Id, { onSuccess: () => toast('Removed from blacklist') });
+    } else {
+      addBlacklist.mutate(yad2Id, { onSuccess: () => toast('\u2713 Blacklisted') });
+    }
   };
 
   const favCount = favData?.favorites?.length ?? 0;
@@ -138,9 +182,26 @@ export default function FavoritesPage() {
   const isLoading = tab === 'favorites' ? favLoading : tab === 'whitelist' ? whitelistLoading : blacklistLoading;
 
   const filtered = useMemo(
-    () => applyFilters(rawItems, neighborhoods, selectedRooms, source, sortBy, debouncedKeyword, minPriceSqm, maxPriceSqm),
-    [rawItems, neighborhoods, selectedRooms, source, sortBy, debouncedKeyword, minPriceSqm, maxPriceSqm]
+    () => applyFilters(
+      rawItems, neighborhoods, selectedRooms, source, sortBy, debouncedKeyword,
+      minPriceSqm, maxPriceSqm, minPrice, maxPrice, minSqm, maxSqm, signalFilters
+    ),
+    [rawItems, neighborhoods, selectedRooms, source, sortBy, debouncedKeyword,
+     minPriceSqm, maxPriceSqm, minPrice, maxPrice, minSqm, maxSqm, signalFilters]
   );
+
+  const activeFilterCount = useMemo(() => (
+    (minPrice ? 1 : 0) +
+    (maxPrice ? 1 : 0) +
+    (minSqm ? 1 : 0) +
+    (maxSqm ? 1 : 0) +
+    (minPriceSqm ? 1 : 0) +
+    (maxPriceSqm ? 1 : 0) +
+    (neighborhoods.length > 0 ? 1 : 0) +
+    (selectedRooms.length > 0 ? 1 : 0) +
+    (source ? 1 : 0) +
+    (signalFilters.length > 0 ? 1 : 0)
+  ), [minPrice, maxPrice, minSqm, maxSqm, minPriceSqm, maxPriceSqm, neighborhoods, selectedRooms, source, signalFilters]);
 
   const emptyMessage =
     tab === 'favorites'
@@ -150,6 +211,13 @@ export default function FavoritesPage() {
       : 'No blacklisted properties. Use the red X on property cards.';
 
   return (
+    <PullToRefresh onRefresh={async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['favorites'] }),
+        queryClient.invalidateQueries({ queryKey: ['whitelistProperties'] }),
+        queryClient.invalidateQueries({ queryKey: ['blacklistProperties'] }),
+      ]);
+    }}>
     <div className="max-w-lg mx-auto px-4 py-4 space-y-4">
       <h1 className="text-xl font-bold text-gray-900">My Listings</h1>
 
@@ -182,21 +250,12 @@ export default function FavoritesPage() {
       </div>
 
       <FilterBar
-        items={rawItems}
-        neighborhoods={neighborhoods}
-        setNeighborhoods={setNeighborhoods}
-        selectedRooms={selectedRooms}
-        setSelectedRooms={setSelectedRooms}
-        source={source}
-        setSource={setSource}
         sortBy={sortBy}
         setSortBy={setSortBy}
         keyword={keyword}
         setKeyword={setKeyword}
-        minPriceSqm={minPriceSqm}
-        maxPriceSqm={maxPriceSqm}
-        onMinPriceSqmChange={setMinPriceSqm}
-        onMaxPriceSqmChange={setMaxPriceSqm}
+        activeFilterCount={activeFilterCount}
+        onOpenDrawer={() => setShowDrawer(true)}
       />
 
       {isLoading && (
@@ -225,6 +284,34 @@ export default function FavoritesPage() {
           />
         ))}
       </div>
+
+      {/* Filter Drawer */}
+      <FilterDrawer
+        open={showDrawer}
+        onClose={() => setShowDrawer(false)}
+        items={rawItems}
+        minPrice={minPrice}
+        maxPrice={maxPrice}
+        setMinPrice={setMinPrice}
+        setMaxPrice={setMaxPrice}
+        selectedRooms={selectedRooms}
+        setSelectedRooms={setSelectedRooms}
+        minSqm={minSqm}
+        maxSqm={maxSqm}
+        setMinSqm={setMinSqm}
+        setMaxSqm={setMaxSqm}
+        minPriceSqm={minPriceSqm}
+        maxPriceSqm={maxPriceSqm}
+        setMinPriceSqm={setMinPriceSqm}
+        setMaxPriceSqm={setMaxPriceSqm}
+        neighborhoods={neighborhoods}
+        setNeighborhoods={setNeighborhoods}
+        source={source}
+        setSource={setSource}
+        signalFilters={signalFilters}
+        setSignalFilters={setSignalFilters}
+      />
     </div>
+    </PullToRefresh>
   );
 }

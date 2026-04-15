@@ -126,21 +126,10 @@ export default function SearchResultsPage() {
         )}
 
         <FilterBar
-          items={rawItems}
-          neighborhoods={neighborhoods}
-          setNeighborhoods={setNeighborhoods}
-          selectedRooms={selectedRooms}
-          setSelectedRooms={setSelectedRooms}
-          source=""
-          setSource={() => {}}
           sortBy={sortBy}
           setSortBy={setSortBy}
           keyword={keyword}
           setKeyword={setKeyword}
-          minPriceSqm=""
-          maxPriceSqm=""
-          onMinPriceSqmChange={() => {}}
-          onMaxPriceSqmChange={() => {}}
         />
 
         {propsLoading && (

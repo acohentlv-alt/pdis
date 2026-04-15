@@ -36,8 +36,19 @@ query($sq: SearchBulletinQueryInput!) {
       }
       parking sellerType generalCondition
       images { imageUrl }
-      buildingYear yearBuilt year_built buildYear constructionYear
-      additionalDetails
+      buildingYear
+      poc {
+        __typename
+        ... on AgentPoc {
+          displayNumber
+          company
+          agentContact { name }
+        }
+        ... on UserPoc {
+          displayNumber
+          contactInfo { name }
+        }
+      }
     }
   }
 }
@@ -284,6 +295,7 @@ def _parse_madlan_listing(bulletin: dict, category: str) -> ScrapedListing | Non
         total_floors=total_floors,
         year_built=year_built_madlan,
         square_meters=square_meters,
+        square_meter_build=None,
         price=price,
         currency="ILS",
         property_type=property_type,

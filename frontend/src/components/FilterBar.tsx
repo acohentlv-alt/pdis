@@ -1,156 +1,81 @@
-import { useState } from 'react';
-
 interface FilterBarProps {
-  items: Record<string, unknown>[];
-  neighborhoods: string[];
-  setNeighborhoods: (v: string[]) => void;
-  selectedRooms: string[];
-  setSelectedRooms: (v: string[]) => void;
-  source: string;
-  setSource: (v: string) => void;
   sortBy: string;
   setSortBy: (v: string) => void;
   keyword: string;
   setKeyword: (v: string) => void;
-  minPriceSqm: string;
-  maxPriceSqm: string;
-  onMinPriceSqmChange: (v: string) => void;
-  onMaxPriceSqmChange: (v: string) => void;
-}
-
-const ROOM_OPTIONS = ['Studio', '1', '1.5', '2', '2.5', '3', '3.5', '4', '4.5', '5', '6+'];
-
-function toggleValue(arr: string[], val: string): string[] {
-  return arr.includes(val) ? arr.filter(v => v !== val) : [...arr, val];
+  activeFilterCount?: number;
+  onOpenDrawer?: () => void;
 }
 
 export default function FilterBar({
-  items,
-  neighborhoods,
-  setNeighborhoods,
-  selectedRooms,
-  setSelectedRooms,
-  source,
-  setSource,
   sortBy,
   setSortBy,
   keyword,
   setKeyword,
-  minPriceSqm,
-  maxPriceSqm,
-  onMinPriceSqmChange,
-  onMaxPriceSqmChange,
+  activeFilterCount = 0,
+  onOpenDrawer,
 }: FilterBarProps) {
-  const [showNeighborhoods, setShowNeighborhoods] = useState(false);
-
-  const uniqueNeighborhoods = Array.from(new Set(
-    items.map(i => i.neighborhood as string).filter(Boolean)
-  )).sort();
-
   return (
-    <div className="space-y-2 py-2">
-      <div className="relative">
+    <div className="flex gap-2 py-2 items-center">
+      {/* Keyword search */}
+      <div className="relative flex-1">
+        <svg
+          className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
+          width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
+        >
+          <circle cx="11" cy="11" r="8" />
+          <path d="m21 21-4.3-4.3" />
+        </svg>
         <input
           type="text"
           value={keyword}
           onChange={e => setKeyword(e.target.value)}
-          placeholder="Search keywords..."
-          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white pr-8"
+          placeholder="Search keywords"
+          className="w-full border border-gray-200 bg-gray-50 rounded-xl pl-9 pr-9 py-2 text-sm min-h-[44px] focus:bg-white focus:border-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900/10 transition-all placeholder:text-gray-400"
         />
         {keyword && (
           <button
             onClick={() => setKeyword('')}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm"
-          >&#x2715;</button>
+            className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 hover:bg-gray-200 rounded-full text-xs min-h-[32px] min-w-[32px] flex items-center justify-center transition-colors"
+            aria-label="Clear search"
+          >
+            &#x2715;
+          </button>
         )}
       </div>
 
-      <div>
+      {/* Sort */}
+      <select
+        value={sortBy}
+        onChange={e => setSortBy(e.target.value)}
+        className="border border-gray-200 bg-gray-50 rounded-xl px-3 py-2 text-sm font-medium text-gray-700 min-h-[44px] focus:bg-white focus:border-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900/10 transition-all"
+      >
+        <option value="days_on_market">Market time</option>
+        <option value="price">Price</option>
+        <option value="price_sqm">Price/sqm</option>
+      </select>
+
+      {/* Filters button */}
+      {onOpenDrawer && (
         <button
-          onClick={() => setShowNeighborhoods(v => !v)}
-          className="text-xs text-gray-500 mb-1 flex items-center gap-1 hover:text-gray-700"
+          onClick={onOpenDrawer}
+          className={`flex items-center gap-1.5 rounded-xl px-4 text-sm font-semibold min-h-[44px] whitespace-nowrap transition-all ${
+            activeFilterCount > 0
+              ? 'bg-gray-900 text-white shadow-md shadow-gray-900/20'
+              : 'bg-gray-50 text-gray-700 border border-gray-200 hover:border-gray-400'
+          }`}
         >
-          <span>{showNeighborhoods ? '▲' : '▼'}</span>
-          <span>Neighborhood{neighborhoods.length > 0 ? ` (${neighborhoods.length})` : ''}</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" />
+          </svg>
+          Filters
+          {activeFilterCount > 0 && (
+            <span className="bg-white text-gray-900 text-[11px] font-bold rounded-full min-w-[20px] h-5 px-1.5 flex items-center justify-center">
+              {activeFilterCount}
+            </span>
+          )}
         </button>
-        {showNeighborhoods && (
-          <div className="flex gap-1.5 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
-            <button
-              onClick={() => setNeighborhoods([])}
-              className={`px-3 py-1.5 text-sm rounded-full whitespace-nowrap shrink-0 border transition-colors ${
-                neighborhoods.length === 0 ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-300'
-              }`}
-            >All</button>
-            {uniqueNeighborhoods.map(n => (
-              <button
-                key={n}
-                onClick={() => setNeighborhoods(toggleValue(neighborhoods, n))}
-                className={`px-3 py-1.5 text-sm rounded-full whitespace-nowrap shrink-0 border transition-colors ${
-                  neighborhoods.includes(n) ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-300'
-                }`}
-              >{n}</button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div>
-        <div className="text-xs text-gray-500 mb-1">Rooms</div>
-        <div className="flex gap-1.5 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
-          <button
-            onClick={() => setSelectedRooms([])}
-            className={`px-3 py-1.5 text-sm rounded-full whitespace-nowrap shrink-0 border transition-colors ${
-              selectedRooms.length === 0 ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-300'
-            }`}
-          >All</button>
-          {ROOM_OPTIONS.map(r => (
-            <button
-              key={r}
-              onClick={() => setSelectedRooms(toggleValue(selectedRooms, r))}
-              className={`px-3 py-1.5 text-sm rounded-full whitespace-nowrap shrink-0 border transition-colors ${
-                selectedRooms.includes(r) ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-300'
-              }`}
-            >{r}</button>
-          ))}
-        </div>
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        <select
-          value={source}
-          onChange={e => setSource(e.target.value)}
-          className="flex-1 min-w-[100px] border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
-        >
-          <option value="">All sources</option>
-          <option value="yad2">Yad2</option>
-          <option value="madlan">Madlan</option>
-        </select>
-
-        <select
-          value={sortBy}
-          onChange={e => setSortBy(e.target.value)}
-          className="flex-1 min-w-[130px] border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
-        >
-          <option value="days_on_market">Market time + Signals</option>
-          <option value="price">Price</option>
-          <option value="price_sqm">Price/sqm</option>
-        </select>
-
-        <input
-          type="number"
-          value={minPriceSqm}
-          onChange={e => onMinPriceSqmChange(e.target.value)}
-          placeholder="Min ₪/sqm"
-          className="w-[100px] border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
-        />
-        <input
-          type="number"
-          value={maxPriceSqm}
-          onChange={e => onMaxPriceSqmChange(e.target.value)}
-          placeholder="Max ₪/sqm"
-          className="w-[100px] border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
-        />
-      </div>
+      )}
     </div>
   );
 }

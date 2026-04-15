@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     fb_scans_per_day: int = 2
     yad2_vm_ingestion_enabled: bool = False
     govmap_ingestion_enabled: bool = False
+    # Yad2 phone fetch (per-listing customer endpoint on gw.yad2.co.il)
+    yad2_phone_fetch_enabled: bool = False
+    yad2_phone_backfill_batch_size: int = 310
+    yad2_phone_scan_cap: int = 40
+    yad2_phone_fetch_delay_seconds: float = 0.6
+    yad2_phone_retry_cooldown_days: int = 7
 
 
 settings = Settings()
