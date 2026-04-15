@@ -1,5 +1,5 @@
 # PDIS — Claude Code Operating Guide
-*Last updated: March 31, 2026*
+*Last updated: April 15, 2026*
 
 ---
 
@@ -13,7 +13,7 @@ Alan is not a coder. Every explanation must be in **plain English**. Explain the
 
 ## What PDIS Is
 
-PDIS (Property Distress Intelligence System) is a rental property monitoring tool for the Israeli market. It scans Yad2 and Madlan for rental listings in Tel Aviv, tracks them over time, detects distress signals (price drops, relistings, long time on market), and classifies properties as hot/warm/cold. Built for Alan's friend Shechter.
+PDIS (Property Distress Intelligence System) is a rental property monitoring tool for the Israeli market. It scans Yad2, Madlan, and Facebook Groups for rental listings in Tel Aviv, tracks them over time, and detects distress signals (price drops, relistings, long time on market, urgent language, etc.). Built for Alan's friend Shechter.
 
 **How it works:** Automated scans run twice daily (08:00 and 18:00 Israel time). Shechter opens the mobile-first web app and sees fresh opportunities — properties where the landlord might be desperate (price dropped, relisted multiple times, been listed too long).
 
@@ -53,20 +53,21 @@ Token reuses `gh auth token` (scopes: `repo, gist, read:org, workflow`). If it s
 | `pdis/scraper.py` | Yad2 scraper — REST API via curl_cffi with Chrome TLS impersonation |
 | `pdis/scraper_madlan.py` | Madlan scraper — GraphQL API via curl_cffi, PerimeterX cookie handling |
 | `pdis/scanner.py` | Scan orchestrator — `run_scan()` and `run_all_scans()` pipeline |
-| `pdis/signals.py` | Distress signal calculator — tier-based signal detection (strong/weak signals) |
+| `pdis/signals.py` | Distress signal calculator — strong/weak signal detection |
 | `pdis/events.py` | Event detection — compares snapshots between sessions |
-| `pdis/classification.py` | Tier-based: 1+ strong signal = hot, 3+ weak = hot, 2 weak = warm, else cold |
+| `pdis/classification.py` | Persists signal details to `property_classifications`. No tier labels (no hot/warm/cold). |
 | `pdis/matching.py` | Cross-source dedup — coordinates, customer_id, text similarity |
+| `pdis/comps.py` | Closed-transaction comps (govmap) per building/neighborhood |
 | `pdis/database.py` | Migrations + connection pool |
 | `pdis/config.py` | Settings from environment variables |
 | `pdis/api/main.py` | FastAPI app + lifespan + SPA routing |
-| `pdis/api/routes.py` | All API endpoints (~43) |
+| `pdis/api/routes.py` | All API endpoints (~65) |
 
 ### Frontend (React + TypeScript + Vite + Tailwind)
 
 | Page | Route | Purpose |
 |------|-------|---------|
-| HomePage | `/` | Main dashboard: opportunities/fullscan tabs, SummaryBar, filters |
+| OpportunityPage | `/` | Main dashboard: opportunities/fullscan tabs, SummaryBar, filters. Also aliased at `/rent` and `/buy`. |
 | FavoritesPage | `/favorites` | Starred properties |
 | SearchPage | `/search` | Ad-hoc search form |
 | SearchResultsPage | `/search/results` | Past open search queries + results |
@@ -96,9 +97,17 @@ Token reuses `gh auth token` (scopes: `repo, gist, read:org, workflow`). If it s
 - Image base URL: `https://images2.madlan.co.il` (NOT images.madlan.co.il)
 - Less structured than Yad2 but provides cross-source validation
 
-### Facebook Marketplace (planned, not built)
-- Reviewed and parked. Needs Playwright + perceptual image hashing.
-- See TASKS.md for full reviewer findings.
+### Facebook Groups (active)
+- Playwright scraper on Oracle VM (`vm-scraper/run.py`) — real browser session, reuses Alan's FB cookies (`vm-scraper/fb_state.json`)
+- Scrapes Tel Aviv rental groups; catalog in `fb_groups` table (49 groups seeded)
+- POSTs to Render at `POST /api/ingest/facebook` with `INGEST_SECRET` bearer
+- Gated by `FB_INGESTION_ENABLED` flag (default False)
+- Health tracked in `ingest_state` table (last_ok_at, warning counters)
+- Hebrew/English sqm regex handles מ״ר, מטר, sqm, m², etc.
+
+### Facebook Marketplace (parked)
+- Different from FB Groups. Needs Playwright + perceptual image hashing.
+- Revisit after FB Groups pipeline proven.
 
 ---
 
@@ -111,19 +120,25 @@ Token reuses `gh auth token` (scopes: `repo, gist, read:org, workflow`). If it s
 | `properties` | All tracked properties (address, price, rooms, coordinates, etc.) |
 | `property_snapshots` | Point-in-time snapshots per scan session |
 | `property_events` | Detected changes (price_drop, relisting, removal, etc.) |
-| `property_classifications` | hot/warm/cold classification + signal details |
+| `property_classifications` | Signal details (strong/weak signal lists, buyer_fit_tags) per property per session |
 | `property_matches` | Cross-source duplicate matches |
-| `whitelist` / `blacklist` | Manual overrides for classification |
+| `whitelist` / `blacklist` | Manual overrides (whitelist surfaces, blacklist hides) |
 | `operator_notes` | Free-text notes on properties |
 | `favorites` | Starred properties |
 | `scan_preset_stats` | Aggregated stats per preset per session |
-| `property_operator_input` | Operator input fields: agent_name, manual_days_on_market, flexibility, condition |
+| `property_operator_input` | Operator input: agent_name, manual_days_on_market, flexibility, condition |
+| `fb_groups` | Facebook Groups catalog (group_id, name, url, is_active) |
+| `ingest_state` | Per-source ingest health (last_ok_at, consecutive failures) |
+| `closed_transactions` | Govmap historical deals (gush/parcel, coords, price, date, year_built) |
+| `building_metadata` | Year-built cache per normalized address (source: tlv_municipality, madlan_cache, manual) |
+| `neighborhood_thresholds` | Amit-fit buyer price targets per neighborhood |
+| `neighborhood_feature_adjustments` | Per-neighborhood year/floor/parking/mamad price adjustments |
 
 ### The `yad2_id` column
 Named for historical reasons but used as the universal external ID for ALL sources:
 - Yad2: raw listing ID
 - Madlan: `madlan_{bid}`
-- Facebook (future): `fb_{listing_id}`
+- Facebook Groups: `fb_{post_id}`
 
 ---
 
@@ -133,15 +148,16 @@ Named for historical reasons but used as the universal external ID for ALL sourc
 run_scan(preset_id):
   1. Load preset (must be is_active = TRUE)
   2. Create scan_session (status = running)
-  3. Scrape (route to Yad2 or Madlan based on extra_params.source)
+  3. Scrape (route to Yad2 or Madlan based on extra_params.source; FB ingest arrives via VM scraper)
   4. Upsert properties (ON CONFLICT updates all fields)
   5. Create property_snapshots (deduplicated)
   6. Detect events (compare to previous session)
-  7. Classify properties (hot/warm/cold)
-  8. Find matches (cross-source dedup)
-  9. Detect customer relistings
-  10. Record preset stats
-  11. Update session to done/blocked/error
+  7. Find matches (cross-source dedup) — runs BEFORE signals because comp signals need building metadata
+  8. Backfill year_built (from building_metadata cache or tlv_municipality)
+  9. Compute signals (strong/weak) and persist signal details to property_classifications
+  10. Detect customer relistings
+  11. Record preset stats
+  12. Update session to done/blocked/error
 ```
 
 `run_all_scans()` runs all active presets sequentially, then detects removals.
@@ -157,9 +173,9 @@ run_scan(preset_id):
 
 ## Distress Signals
 
-Tier-based signal classification in `signals.py`. No numeric scores — signals are either **strong** or **weak**.
+Computed in `signals.py`. No numeric scores — signals are either **strong** or **weak**, surfaced as badges on each property. No hot/warm/cold tiers.
 
-### Strong Signals (any 1 = hot)
+### Strong Signals
 
 | Signal | Detection |
 |--------|-----------|
@@ -169,8 +185,10 @@ Tier-based signal classification in `signals.py`. No numeric scores — signals 
 | `weak_language` | Hebrew distress keywords in description (דחוף, גמיש, חייב, etc.) |
 | `condition_keywords` | Renovation/old property keywords (שיפוץ, סבתא, ריענון) |
 | `below_avg_price` | Price/sqm > 20% below neighborhood average |
+| `below_closed_comps` | Price/sqm materially below closed-transaction comps for this building |
+| `above_closed_comps_20pct` | Price/sqm > 20% above closed-transaction comps (possible overpricing = leverage) |
 
-### Weak Signals (3+ = hot, 2 = warm, 1 = cold)
+### Weak Signals
 
 | Signal | Detection |
 |--------|-----------|
@@ -179,11 +197,10 @@ Tier-based signal classification in `signals.py`. No numeric scores — signals 
 | `listed_30_60_days` | Days on market 30–89 |
 | `desc_changes` | Description changed since first seen |
 | `img_changes` | Images changed since first seen |
-| `move_in_urgent` | Move-in date within 14 days |
 
-Classification: whitelist forces hot, blacklist forces cold.
+Whitelist surfaces a property regardless of signals; blacklist hides it.
 
-**DO NOT show numeric scores in the UI.** Show signal badges and classification labels only.
+**DO NOT show numeric scores in the UI.** Show signal badges only.
 
 ---
 
@@ -205,7 +222,7 @@ FastAPI matches routes top-to-bottom. Path parameter routes (`{preset_id}`, `{ya
 - `CREATE TABLE` must use `IF NOT EXISTS`
 - All React hooks (useState, useMutation, useMemo) MUST be before any `if (...) return` early returns — this caused React error #310 three separate times
 - Property images: Yad2 URLs work directly, Madlan uses `images2.madlan.co.il`
-- Removal detection only runs in `run_all_scans()`, not per-preset
+- Removal detection only runs in `run_all_scans()` for Yad2/Madlan scrapes, not per-preset. **Exception:** FB ingest has its own FB-scoped removal sweep in `scanner.py::_mark_fb_removals_for_session`, called from `run_scan_from_listings`.
 - Cross-source matching uses Haversine distance (50m same-source, 100m cross-source)
 - Hebrew text in property data is fine (comes from listings) — UI labels must be English
 - Condition keyword שמור was removed (means "maintained" = positive, not needing work)
@@ -242,9 +259,51 @@ FastAPI matches routes top-to-bottom. Path parameter routes (`{preset_id}`, `{ya
 
 ## Deployment
 
-- **Target:** Render (render.yaml exists, not yet deployed)
+- **Target:** Render (auto-deploys on push to main) — live at https://pdis-lsah.onrender.com
 - **Database:** Neon (cloud PostgreSQL)
 - **Scheduled scans:** cron-job.org → `POST /api/scan/scheduled` with `CRON_SECRET`
 - **Build:** `pip install -r requirements.txt && cd frontend && npm install && npm run build`
 - **Start:** `uvicorn pdis.api.main:app --host 0.0.0.0 --port $PORT`
-- **Yad2 forsale scraping runs on Oracle VM** (not Render — Render's IP is blocked by ShieldSquare on /forsale). See vm-scraper/README.md.
+
+### What runs where
+
+| Source | Runs on | Reason |
+|--------|---------|--------|
+| Yad2 rent | Render | `/realestate/rent` not blocked; curl_cffi Chrome impersonation works from Render IP |
+| Madlan | Render | PerimeterX cookie enough; no browser needed |
+| Yad2 forsale | Oracle VM (`vm-scraper/run_yad2.py`) | `/forsale` IP-blocked by ShieldSquare on Render |
+| Facebook Groups | Oracle VM (`vm-scraper/run.py`) | Real browser required (Playwright + cookies) |
+| Govmap backfill | Oracle VM (`vm-scraper/run_govmap.py`) | Long-running backfill, tmux/persistent disk |
+
+Rule of thumb: **Render until it breaks, VM when it must.** VM workers POST to Render's ingest endpoints (`/api/ingest/facebook`, `/api/ingest/yad2`, `/api/ingest/govmap-deals`) with `INGEST_SECRET` bearer.
+
+### Oracle VM
+
+`ssh -i ~/.ssh/oracle_vm ubuntu@129.159.158.214`. 1GB RAM micro — keep processes lean. Logs typically under `~/vm-scraper/logs/` or via `journalctl` for systemd units. See `vm-scraper/README.md`.
+
+---
+
+## Govmap Closed Transactions
+
+`closed_transactions` table stores historical rental/sale deals from govmap (gush/parcel, centroid coords, sale price, deal date, year built). Used by `pdis/comps.py` to compute building-level comps, which feed the `below_closed_comps` / `above_closed_comps_20pct` signals and the UI's "comparable deals" section.
+
+Backfill script: `vm-scraper/run_govmap.py` on the Oracle VM. POSTs in batches to `POST /api/ingest/govmap-deals`. Gated by `GOVMAP_INGESTION_ENABLED`.
+
+---
+
+## Environment Variables
+
+| Var | Purpose |
+|-----|---------|
+| `DATABASE_URL` | Neon PostgreSQL connection string |
+| `CRON_SECRET` | Bearer for cron-job.org → `/api/scan/scheduled` |
+| `INGEST_SECRET` | Bearer for VM scrapers → `/api/ingest/*` |
+| `FB_INGESTION_ENABLED` | bool, gate for `/api/ingest/facebook` |
+| `FB_SCANS_PER_DAY` | int, FB VM scan cadence (1 during probation, 2 normal) |
+| `YAD2_VM_INGESTION_ENABLED` | bool, gate for `/api/ingest/yad2` (forsale) |
+| `GOVMAP_INGESTION_ENABLED` | bool, gate for `/api/ingest/govmap-deals` |
+| `PROXY_URL` | Residential proxy (required for FB VM scraper) |
+| `MADLAN_*` | Timeouts, delays, retries for Madlan scraper |
+| `SCRAPE_*` | Page/request settings for Yad2 rent scraper |
+| `LOG_LEVEL`, `LOG_FORMAT` | App logging |
+| `API_HOST`, `API_PORT` | Uvicorn bind (local dev) |
