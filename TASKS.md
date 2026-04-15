@@ -66,6 +66,31 @@ Then install monthly cron (exact block in `TASKS_2026-04-14.md`).
 
 ## NOT STARTED
 
+### 💰 Consolidate on Oracle VM — kill Render (post-A2)
+Once A2 (FB laptop daemon + queue) ships and stabilizes, move the whole app off Render onto the Oracle VM (`129.159.158.214`). Render costs ~$7/mo and its only remaining value is `git push` auto-deploy + managed HTTPS — both replaceable.
+
+**What moves:**
+- FastAPI backend (uvicorn under systemd)
+- React frontend (served as static files by uvicorn or Caddy)
+- Yad2 rent + Madlan scrapers (move from cron-job.org → systemd timers on VM)
+- Ingest receiver endpoints (VM scrapers and laptop daemon already POST to Render; repoint to VM)
+
+**What stays:**
+- Neon Postgres (free tier, no reason to move)
+- Oracle VM (already there)
+- cron-job.org — optional; systemd timers on VM replace it, or keep for external heartbeat
+
+**What to set up:**
+- Caddy (or nginx) in front of uvicorn for HTTPS — Caddy does Let's Encrypt auto-renew with one config line
+- Domain → `129.159.158.214` (DuckDNS or a real domain)
+- systemd units: `pdis-api.service`, `pdis-yad2-rent.timer`, `pdis-madlan.timer`
+- Deploy hook or simple `git pull && systemctl restart pdis-api`
+- `.env` on VM (DATABASE_URL + all flags from `CLAUDE.md` env table)
+
+**Risk:** 1GB-RAM micro VM is tight. Adding uvicorn + React build on top of existing scrapers might hit memory pressure. Monitor with `free -m` / `htop` after go-live. Fallback: Oracle free tier offers 4-core ARM with up to 24GB RAM — migrate to a bigger instance if the micro chokes.
+
+**Rule:** do this **after A2 ships and proves stable for 1+ week.** Don't compound moving pieces mid-flight.
+
 ### 🔍 Haifa Buy preset — "Last scan blocked — source returned nothing" (investigate tomorrow)
 Screenshot flagged by Alan Apr 15 late: `Haifa Buy` preset (Yad2, All neighborhoods, Active) shows *"Last scan blocked — source returned nothing"*.
 
