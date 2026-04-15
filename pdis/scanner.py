@@ -875,12 +875,11 @@ async def run_scan_from_listings(preset_id: int, listings: list[ScrapedListing],
         if relist_count > 0:
             log.info("scanner.ingest_customer_relistings", count=relist_count)
 
-        # FB-scoped removals — AFTER matching. Yad2 per-preset scrapes cannot sweep
-        # the full source so removal detection is skipped for non-facebook sources.
-        if source == "facebook":
-            removal_count = await _mark_fb_removals_for_session(session_id)
-            if removal_count > 0:
-                log.info("scanner.fb_removals_marked", count=removal_count)
+        # FB removal detection is DISABLED — Apify runs with resultsLimit=5 per
+        # group (sampling), so "not in this ingest" != "removed from FB". FB posts
+        # also stay in groups indefinitely. Re-enable only if we switch to an
+        # exhaustive sweep.
+        removal_count = 0
 
         await _record_preset_stats(preset_id, session_id)
 
