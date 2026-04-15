@@ -1,3 +1,39 @@
+# HANDOFF — April 15, 2026 (late session + consolidation session)
+
+## CONSOLIDATION SESSION (Alan + second agent, after "late session")
+
+### What we did
+
+Opened Pandora's box: compared CLAUDE.md against the actual code. Audit found 10 drift items (8 doc-stale, 2 real code bugs). Decided to drop the hot/warm/cold classification concept entirely (code never computed it anyway — Alan chose not to resurrect it) and delete the `move_in_urgent` weak signal line (never built). Rewrote CLAUDE.md to match code reality: added FB Groups as an active source, added 6 missing tables (fb_groups, ingest_state, closed_transactions, building_metadata, neighborhood_thresholds, neighborhood_feature_adjustments), added the Render-vs-VM "What runs where" table, added the Govmap section, documented 12 env vars, fixed scan pipeline order (matching runs before signals), noted FB removal-detection exception. Ran a reviewer to verify — 30 of 33 load-bearing claims matched code ✅, 2 gaps fixed, 1 minor unverified.
+
+Then answered Alan's strategic question "why do I still need Render?" — honestly, he probably doesn't. Queued a **post-A2 Render → Oracle VM consolidation** task (save ~$7/mo, one deploy target instead of two, trade `git push` convenience for Caddy + systemd on the VM).
+
+Investigated the Haifa Buy screenshot Alan flagged: **root cause is NOT ShieldSquare IP block** (initial hypothesis was wrong — three other forsale presets succeeded Apr 14). Real cause: preset 9 has zero filters → asks Yad2 for every Haifa for-sale listing → anti-bot throttles. Fix = delete preset 9 (redundant with filtered Haifa variants 11+12) or add filters. **Not** a VM deployment problem.
+
+### Commits pushed this session
+
+- `74e9232` Update CLAUDE.md to match code reality
+- `022d585` Queue Haifa Buy scan-blocked investigation
+- `86f3ea9` Queue Render → Oracle VM consolidation (post-A2)
+- `5bf1d44` Resolve Haifa Buy diagnosis (not ShieldSquare, unfiltered query)
+
+### Heads-up on the working tree
+
+Working tree has substantial uncommitted WIP from the **parallel agent building A2**: new `pdis/utils/city.py` (normalize_city helper), new `laptop-daemon/` directory (macOS launchd + daemon.py polling Render for FB jobs), edits to `routes.py` (fb_scan_queue system), `database.py` (new fb_scan_queue table + retroactive city UPDATE), `config.py` (probation settings), `PresetManager.tsx` (two JSX→function-call tweaks).
+
+**Per Alan's correction mid-session:** the A2 plan pivoted from "Oracle VM + paid residential proxy" to "laptop daemon polling a DB-backed queue" because Alan wants the whole app FREE. This is a **legitimate approved re-plan**, not divergence. The second agent is shipping that. Do NOT touch their files. Future CLAUDE.md updates (post-ship) should change "FB Groups runs on Oracle VM" → "FB Groups runs on Alan's laptop via daemon polling `/api/fb-scan/next`".
+
+### What to do tomorrow morning
+
+1. **Let the other agent finish A2.** Their code is mid-flight. Give them the morning.
+2. Once they commit + push, **update CLAUDE.md** to reflect the laptop-daemon architecture (replacing the "VM for FB" claim I just committed tonight).
+3. **Fix Haifa Buy** (Option A: delete preset 9 — one SQL statement).
+4. **Optionally** knock out the ₪/m² PropertyCard one-liner while waiting.
+
+---
+
+## LATE SESSION (original handoff, preserved below)
+
 # HANDOFF — April 15, 2026 (late session)
 
 ## What we did today
