@@ -1,4 +1,70 @@
-# HANDOFF — April 15, 2026 (late session + consolidation session + evening session + night session)
+# HANDOFF — April 15, 2026 (late2 session + late session + consolidation session + evening session + night session)
+
+## LATE2 SESSION (PresetManager redesign + product analysis + 7 strategic items queued)
+
+### What we did
+
+Started on HANDOFF item "PresetManager polish queued" from the night session. Alan picked **option 2 — redesign + UX restructure** (not just visual, also restructure the form). Ran the full `/plan → /review → /exec → /qa` workflow.
+
+Planner produced a brief with 5 open questions (kebab vs. 4-button strip, backdrop-click dismiss behavior, Active/Inactive badge removal, auto-open "More filters" on edit, keep unused `category` prop). Alan approved my recommendations on all 5. Reviewer caught 3 real implementation gaps (click-outside hook lifecycle, which 19 fields trigger auto-open, backdrop-close state reset) which we resolved into executor addenda. Executor split the 1,362-line monolith into `frontend/src/components/preset-manager/` with 5 focused files:
+- `PresetManager.tsx` (main shell + 22 state hooks all before early return)
+- `PresetForm.tsx` (dumb container, zero hooks)
+- `PresetFormSections.tsx` (5 progressive-disclosure sections)
+- `PresetRow.tsx` (kebab menu — only one open at a time via lifted state)
+- `presetFormUtils.ts` (types, constants, design tokens)
+
+The legacy `components/PresetManager.tsx` is now a 1-line re-export so `OpportunityPage.tsx` import path didn't change.
+
+QA: **38/38 PASS**. Zero console errors. Zero React #310 errors across hooks-order stress tests (rapid source-chip cycling, Rent↔ForSale toggle 5×, edit-cancel-edit across rows).
+
+Then — at Alan's request — did a **project-wide analysis** from the lens "Shechter uses this on iPhone twice a day; everything else is noise." Added 7 strategic items to TASKS.md:
+1. Telemetry (~2h, do first)
+2. "Since yesterday" daily feed
+3. Push notifications (PWA web push)
+4. Phone reveals as North Star metric (depends on #1)
+5. Signals as narrative not taxonomy (one headline per card)
+6. Ingest health visible to Shechter (green/yellow/red dot in header)
+7. Tests on events/matching/signals
+
+Also cleaned TASKS.md: dropped `₪/m² math fix`, `Govmap comps rework Option 2`, and `Phone numbers — SHIPPED` entries that were listed as NOT STARTED but had already shipped in commits `a1e9fa8` and `508cada`. Dropped the verbose "SHIPPED — FB Groups via Apify + Haiku" architecture section but kept its two still-pending TODOs (FilterBar FB option, per-group city overrides).
+
+### Commit pushed this session
+
+- `c66e7b7` PresetManager 2030-vision redesign + UX restructure (6 files, +1895/-1362)
+
+Coexists cleanly with parallel agent commits (`e8b2ba1` Yad2 VM forsale, `4773304` FB cross-source dedup, `e5d2022` Yad2 VM service fix) that landed earlier in the day.
+
+### What's half-done
+
+- **PresetManager manual iPhone QA pending.** Playwright passed every assertion, but Shechter/Alan haven't tapped through it on a real iPhone yet. Test plan is in TASKS.md AWAITING QA. After Render deploys `c66e7b7`, hard-refresh the PWA and walk the checklist.
+- **Working tree still has uncommitted `vm-scraper/run.py` changes** (147 lines) from a parallel agent. Left untouched per CLAUDE.md rule "only stage files YOU changed." Review + commit or revert next session.
+- **All 7 strategic items are queued but not scoped into briefs.** They sit in TASKS.md with Why/What/Cost/Value. When Alan picks one, run `/plan` to produce an executor brief.
+
+### What to do next
+
+1. **Tomorrow morning: iPhone QA of `c66e7b7`.** Walk the PresetManager checklist in TASKS.md. If anything feels off, `/plan` a fix.
+2. **After 08:00 IDT scheduled scan: verify Madlan phones from night-session commit.** SQL: `SELECT COUNT(*) FILTER (WHERE contact_phone IS NOT NULL), COUNT(*) FROM properties WHERE yad2_id LIKE 'madlan_%'`. Expected ≥80% fill.
+3. **Decide on strategic item #1 (telemetry).** Alan's call — is this the Monday-morning priority I recommended, or does something else jump the queue?
+4. **Deal with uncommitted `vm-scraper/run.py`** (parallel agent's WIP). Either they finish it, or Alan decides whether to keep or revert.
+
+### Watch out for
+
+- **Render deploy of `c66e7b7` is in flight during this handoff write.** If the deploy fails, rollback is `git revert c66e7b7 && git push`. The change is pure frontend — zero backend risk.
+- **The PresetManager re-export pattern** at `frontend/src/components/PresetManager.tsx` means if anyone tries to read the old monolith file, they see 1 line. Grep for usages in `preset-manager/` instead.
+- **22 hooks in PresetManager + 2 hooks in PresetRow** — both counts are tight against the early return. If a future change adds a hook after `if (!open) return null`, React #310 will fire. See `CLAUDE.md` rule.
+- **Strategic item #3 (push) and existing task "Telegram bot for scan alerts" overlap.** Pick one channel — don't build both.
+- **TASKS.md was restored from archive + re-edited tonight** after an earlier attempt dropped unfinished items by accident. Current state is verified complete against the Apr 15 night archive.
+
+### Test these (iPhone manual)
+
+Every assertion in TASKS.md AWAITING QA section for the PresetManager redesign. Most critical:
+- Sheet slides up from bottom (not fullscreen).
+- Kebab menu — one open at a time across rows.
+- Edit a preset with advanced fields set → "More filters" auto-opens.
+- Backdrop dismiss → form state wiped.
+- Pricing Targets 3-column grid fits without wrapping on 390px.
+
+---
 
 ## NIGHT SESSION (after the FB U-turn — phones across sources + filter drawer + UI polish)
 
