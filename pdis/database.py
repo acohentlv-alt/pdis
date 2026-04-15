@@ -551,15 +551,6 @@ async def run_migrations() -> None:
                         OR sp.extra_params->'fb_groups' = '[]'::jsonb)
             """)
 
-            # A2: Reset phantom ingest_state.facebook row (last_ok_at was set but zero fb_* properties exist).
-            await cur.execute("""
-                UPDATE ingest_state
-                   SET last_ok_at = NULL,
-                       last_check_at = NULL,
-                       warning_count = 0
-                 WHERE source = 'facebook'
-            """)
-
         await conn.commit()
     logger.info("db.migrations_done")
     await seed_presets()
