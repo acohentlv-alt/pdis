@@ -15,7 +15,7 @@ Alan is not a coder. Every explanation must be in **plain English**. Explain the
 
 PDIS (Property Distress Intelligence System) is a rental property monitoring tool for the Israeli market. It scans Yad2, Madlan, and Facebook Groups for rental listings in Tel Aviv, tracks them over time, and detects distress signals (price drops, relistings, long time on market, urgent language, etc.). Built for Alan's friend Shechter.
 
-**How it works:** Automated scans run twice daily (08:00 and 18:00 Israel time). Shechter opens the mobile-first web app and sees fresh opportunities — properties where the landlord might be desperate (price dropped, relisted multiple times, been listed too long).
+**How it works:** Automated scans run on a daily schedule — Yad2 from Oracle VM at 08:00 IDT (systemd timer); Madlan via cron-job.org → Render at 10:00 IDT (verify second daily slot, if any, in the cron-job.org dashboard); Facebook from Oracle VM at 10:00 IDT (systemd timer). Shechter opens the mobile-first web app and sees fresh opportunities — properties where the landlord might be desperate (price dropped, relisted multiple times, been listed too long).
 
 ---
 
@@ -166,7 +166,7 @@ run_scan(preset_id):
 `run_all_scans()` runs all active presets sequentially, then detects removals.
 
 ### Scheduled Scans
-- External cron (cron-job.org) POSTs to `POST /api/scan/scheduled` at 08:00 and 18:00 Israel time
+- External cron (cron-job.org) POSTs to `POST /api/scan/scheduled` at 10:00 IDT (verified 2026-04-16 from cron-job.org dashboard screenshot — second daily slot, if any, not confirmed; check dashboard)
 - Requires `Authorization: Bearer {CRON_SECRET}` header
 - Fires scan as background task, returns immediately
 - DB-backed lock prevents overlapping scans — checks scan_sessions for status='running' within a 30-min stale window. Stale sessions auto-expire to 'error'.
