@@ -30,10 +30,10 @@ Activates the Yad2 click-to-reveal phone fetcher. Brief #2's behavior gate.
 
 ## NOT STARTED
 
-### 🧹 Playwright-era cleanup — `vm-scraper/run.py` + `tests/test_fb_parser.py`
-Leftovers from the FB legacy-code cleanup (today's session):
-- `vm-scraper/run.py` lines 388 and 431 still reference the deleted `export_fb_cookies.py`. Can't touch now — parallel agent has 147 uncommitted lines in this file. Clean once their work lands.
-- `tests/test_fb_parser.py` imports helpers from `vm-scraper/run.py`. If the parallel agent moves those helpers to `llm_parse.py`, tests break. Update imports when that happens.
+### 🧹 Playwright-era cleanup — delete `vm-scraper/run.py` + fix `tests/test_fb_parser.py`
+`vm-scraper/run.py` (455 lines) is a pure Playwright FB scraper, unused since Apify took over on Apr 15. The committed `run.sh` still points at it, but the VM's deployed `run.sh` calls `apify_to_pdis.py`. Two sub-items:
+- **Delete `vm-scraper/run.py`** and update `vm-scraper/run.sh` to invoke `apify_to_pdis.py`. Removes the whole Playwright scaffolding.
+- **Fix `tests/test_fb_parser.py`** — currently imports helpers (`_extract_price`, etc.) from `vm-scraper/run.py`. Either move those helpers into `vm-scraper/llm_parse.py` / `vm-scraper/apify_to_pdis.py` (wherever they still live), or delete the tests if they cover dead code.
 
 ### 🆕 FB city bleed — non-TLV posts mislabeled as TLV
 Tonight's investigation showed FB posts from Kfar Saba etc. get `address_city='תל אביב יפו'` because `vm-scraper/apify_to_pdis.py` uses `GROUP_CITY_MAP` to hardcode city per group. Haiku extracts neighborhood but city goes unchecked. **Two fix options:**

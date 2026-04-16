@@ -385,7 +385,7 @@ def main() -> None:
         log.info("proxy configured: server=%s", proxy_config["server"])
 
     if not STATE_FILE.exists():
-        log.error("state.json not found at %s — run export_fb_cookies.py first", STATE_FILE)
+        log.error("state.json not found at %s (Playwright scraper is deprecated — see apify_to_pdis.py)", STATE_FILE)
         raise SystemExit(1)
 
     r = httpx.get(f"{PDIS_API_URL}/api/fb-groups/active", timeout=30)
