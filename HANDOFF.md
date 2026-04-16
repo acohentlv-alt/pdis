@@ -84,6 +84,43 @@ After the day session wrote the handoff above, this agent ran a live test of the
 
 ---
 
+## Evening session — three more commits (`0f97418`, `1988ecf`, `80aa479`, `5ea247f`)
+
+After the late-afternoon handoff was written, Alan returned with a specific issue: clicking the "Amit Fit" pill showed no rental options, because sort-by-% ASC was burying the 4 rent matches behind 73 forsale matches.
+
+**Net: 4 more commits on main tonight, all pushed, Render redeploying.**
+
+1. **`0f97418` — Amit Fit pill split** (Rent + Buy). Single pill became two: "Amit Fit Rent" and "Amit Fit Buy". Backend `/api/amit-fit/properties` gained optional `?category=rent|forsale` param. Admin UI unlocked: PresetManager's "Pricing Targets (Amit Fit)" and "Feature Adjustments (Amit Fit)" collapsibles now appear for **rent** presets (previously forsale-only). `neighborhood_thresholds` table already had 7 Florentin rent rows that matched Amit's table 100% (2485–5925 ₪/mo across size buckets) — they were just never surfaced due to single-pill sort burial. Full `/plan → /review → /exec → /qa` cycle; QA found 3 real bugs mid-exec (SQL `OR preset_id IS NULL` leaked rent into forsale, missing 400 validation, forsale-only gates not removed in PresetFormSections.tsx). Fixed inline; final QA 6/6.
+2. **`1988ecf` — Show hidden presets toggle.** Today's earlier commit `0de9b52` filtered disabled presets out of the PresetManager list, giving the illusion that toggling a preset OFF deleted it. New toggle at top of modal, default OFF, resets on modal close (verified). Greyed rows at 60% opacity with tappable switch to re-enable. Local QA 12/12.
+3. **`80aa479` — Yad2 description token cleanup.** Yad2's feed API returns some descriptions with unresolved merge tokens (`$HomeNum`, `$Floor_text`, `$FurnitureInfo`, etc.). Scraper now strips them + collapses comma/whitespace debris at ingest time. Forsale VM path also gets `_backfill_built_sqm` now (which pulls the cleaner `info_text` from the detail API). Live scan session 197 touched 235 listings — all clean, zero tokens. Legacy rotten rows (141 rent + 119 forsale) will clean organically as they're re-scraped.
+4. **`5ea247f` — TASKS.md churn.** Added the 3 new items (Amit rent thresholds manual task, Show hidden toggle brief, Yad2 description brief) and marked shipped work as done.
+
+**Process notes tonight:**
+- Ran two `/plan → /review → /exec → /qa` cycles in parallel (Show hidden toggle + Yad2 cleanup). Both briefs came back REVISE not APPROVE on first pass — reviewer caught real bugs (missing `:283` auto-select guard in Amit Fit, dead-code WHERE clause in Yad2 cleanup, 7 hardcoded `'forsale'` sites in PresetManager — not the 4 the initial brief listed). Process works when used.
+- Reviewer catch on Yad2 cleanup saved us: original plan included widening a WHERE clause in `_backfill_built_sqm` that would've been effectively dead code (upsert overwrites description before the WHERE evaluates). Dropped that fix; shipped only the 3 that actually do something.
+- Executor on Amit Fit split made unsanctioned deviations TWICE: silently removed `OR preset_id IS NULL` fallback (would've dropped 2 of 4 known rent matches), and skipped the admin UI gate removal despite the brief explicitly calling it out. Both caught by QA; fixed. Pattern: when executor reports "no changes needed" on a point the brief explicitly spelled out, treat as a red flag.
+
+## Evening "What to do next" — supersedes both earlier lists
+
+1. **08:00 IDT (or whenever the auto-scan fires) — check `/api/scan/sessions?limit=20`.** Expect 6 Yad2 `done` sessions + 1 Madlan. If any 500s: `curl https://pdis-lsah.onrender.com/api/debug/recent-errors` for the trace.
+2. **Top up Apify credits** before 10:00 IDT or FB fails again.
+3. **iPhone tap-through the 3 new features on Render:**
+   - Two green pills "Amit Fit Rent" + "Amit Fit Buy" visible, each loads only its category. Rent should show 4 Florentin matches (may be more if any new Florentin rentals landed overnight).
+   - PresetManager → "Show hidden" toggle visible at top, greyed rows appear when ON, gone when OFF, resets on close.
+   - Property detail page on any newly-updated Yad2 listing — description should read cleanly (no `$HomeNum` etc.).
+4. **Enter Florentin rent feature adjustments** via the now-unlocked PresetManager UI (parking +500–1000 ₪/mo, mamad +600 ₪/mo, walk-up-floor effect per Amit's table). 5-min task. See TASKS.md "READY TO RUN".
+5. **Strategic item #1 (telemetry)** still the Monday-morning priority. Two hours, unblocks everything else.
+
+## Evening "Watch out for" — additions
+
+- **`OR p.preset_id IS NULL` in the Amit Fit endpoint SQL is load-bearing** for properties that ingest without a preset_id (2 of 4 known Florentin rent matches). If a future refactor touches `/api/amit-fit/properties` SQL, that clause must survive. Documented in commit `0f97418`.
+- **Rent presets with zero `neighborhood_thresholds` rows produce empty Amit Fit Rent results.** Expected. The 4 Florentin matches exist because the DB was seeded for Florentin rent specifically. Other TLV neighborhoods need Amit to dictate values and Alan to enter them via the unlocked UI.
+- **Yad2 legacy rotten descriptions clean gradually.** Don't panic if the DB still shows 100+ tokenized rows after tomorrow morning's scan — it takes several scan cycles for every listing to reappear. The NEW ingest path is verified clean.
+- **Tonight's 4 pushes mean Render rebuilds 4 more times.** Between now and ~15 minutes from push, cold-start 500s on the first few requests are plausible. Alan's morning traffic should be past any deploy storm.
+
+---
+
 *Archived sessions:*
-- *TASKS_2026-04-16.md — this morning's TASKS (pre-day-session). Immutable.*
+- *TASKS_2026-04-16.md — Apr 16 morning (pre-day-session). Immutable.*
+- *TASKS_2026-04-16_evening.md — Apr 16 evening (this session's TASKS state before fresh rewrite). Immutable.*
 - *HANDOFF_2026-04-15_night2.md — prior handoff from the overnight session. Immutable.*
