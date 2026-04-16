@@ -125,7 +125,7 @@ export default function PresetRow({
   const detailLine = [hoodLabel, propTypesLabel].filter(Boolean).join(' · ');
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-4">
+    <div className={`rounded-2xl border p-4 transition-colors ${isActive ? 'bg-white border-gray-200 shadow-sm' : 'bg-gray-50 border-gray-200 opacity-60'}`}>
       <div className="flex items-center gap-3">
         {/* Toggle switch — enlarged hit area 44×44 */}
         <button

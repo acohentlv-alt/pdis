@@ -69,10 +69,12 @@ export function useClosedComps(yad2Id: string | undefined) {
   });
 }
 
-export function useAllPresets() {
+export function useAllPresets(includeHidden: boolean = false) {
   return useQuery({
-    queryKey: ['presets', 'active'],
-    queryFn: () => apiFetch<{ presets: Record<string, unknown>[] }>('/api/presets?is_active=true'),
+    queryKey: ['presets', includeHidden ? 'all' : 'active'],
+    queryFn: () => apiFetch<{ presets: Record<string, unknown>[] }>(
+      includeHidden ? '/api/presets' : '/api/presets?is_active=true'
+    ),
   });
 }
 

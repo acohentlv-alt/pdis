@@ -44,7 +44,8 @@ export default function PresetManager({ open, onClose, category }: PresetManager
   // ── ALL HOOKS — must be before any conditional return ──────────────────────
 
   const queryClient = useQueryClient();
-  const { data, isLoading } = useAllPresets();
+  const [showHidden, setShowHidden] = useState(false);
+  const { data, isLoading } = useAllPresets(showHidden);
   const createPreset = useCreatePreset();
   const updatePreset = useUpdatePreset();
   const deletePreset = useDeletePreset();
@@ -165,12 +166,22 @@ export default function PresetManager({ open, onClose, category }: PresetManager
     }
   }, [open]);
 
+  // Reset showHidden to default when modal closes
+  useEffect(() => {
+    if (!open) {
+      setShowHidden(false);
+    }
+  }, [open]);
+
   // ── EARLY RETURN ───────────────────────────────────────────────────────────
   if (!open) return null;
 
   // ── DERIVED + HANDLERS ────────────────────────────────────────────────────
 
-  const presets = (data?.presets ?? []) as Record<string, unknown>[];
+  const allPresets = (data?.presets ?? []) as Record<string, unknown>[];
+  const activePresets = allPresets.filter(p => (p.is_active as boolean) ?? true);
+  const hiddenPresets = allPresets.filter(p => !(p.is_active as boolean));
+  const presets = showHidden ? allPresets : activePresets;
   const isFormOpen = showCreate || editingId !== null;
   const saving = createPreset.isPending || updatePreset.isPending || upsertThresholds.isPending || upsertFeatureAdjustments.isPending;
 
@@ -439,6 +450,25 @@ export default function PresetManager({ open, onClose, category }: PresetManager
         ) : (
           /* List view */
           <div className="px-5 pt-4 pb-8 space-y-3">
+            {/* Toggle + count row */}
+            <div className="flex items-center justify-between px-1 pb-1">
+              <span className="text-xs text-gray-500">
+                {showHidden
+                  ? `${activePresets.length} active · ${hiddenPresets.length} hidden`
+                  : `${activePresets.length} active`}
+              </span>
+              <button
+                onClick={() => setShowHidden(v => !v)}
+                className="flex items-center gap-2 text-xs text-gray-600 hover:text-gray-900 min-h-[44px] px-2 rounded-lg hover:bg-gray-50 transition-colors"
+                aria-pressed={showHidden}
+              >
+                <span className={`w-8 h-4 rounded-full transition-colors flex items-center px-0.5 ${showHidden ? 'bg-gray-900' : 'bg-gray-300'}`}>
+                  <span className={`block w-3 h-3 bg-white rounded-full shadow transition-transform ${showHidden ? 'translate-x-4' : 'translate-x-0'}`} />
+                </span>
+                <span>Show hidden</span>
+              </button>
+            </div>
+
             {/* Add Preset button — at TOP of list */}
             <button
               onClick={startCreate}
@@ -452,7 +482,9 @@ export default function PresetManager({ open, onClose, category }: PresetManager
             )}
 
             {!isLoading && presets.length === 0 && (
-              <div className="text-center text-gray-400 py-8">No presets yet.</div>
+              <div className="text-center text-gray-400 py-8">
+                {showHidden ? 'No presets yet.' : 'No active presets.'}
+              </div>
             )}
 
             {/* Scan error banner */}
@@ -486,6 +518,13 @@ export default function PresetManager({ open, onClose, category }: PresetManager
                 setOpenKebabId={setOpenKebabId}
               />
             ))}
+
+            {/* Second empty-state: toggle ON but no hidden presets exist */}
+            {showHidden && hiddenPresets.length === 0 && activePresets.length > 0 && (
+              <div className="text-center text-gray-400 text-xs py-2">
+                No hidden presets.
+              </div>
+            )}
           </div>
         )}
       </div>
