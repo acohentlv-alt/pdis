@@ -1,18 +1,21 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import SummaryBar from '../components/SummaryBar';
 import FilterBar from '../components/FilterBar';
 import FilterDrawer from '../components/FilterDrawer';
 import PropertyCard from '../components/PropertyCard';
 import PresetManager from '../components/PresetManager';
 import PullToRefresh from '../components/PullToRefresh';
-import { usePresetProperties, useAllPresets, useAmitFitProperties, useFavoriteIds, useWhitelistIds, useBlacklistIds, useScanStatus } from '../api/queries';
+import { usePresetProperties, useAllPresets, useAmitFitProperties, useCustomSearch, useFavoriteIds, useWhitelistIds, useBlacklistIds, useScanStatus } from '../api/queries';
+import type { CustomSearchCriteria } from '../api/queries';
 import { useAddFavorite, useRemoveFavorite, useWhitelist, useRemoveWhitelist, useBlacklist, useRemoveBlacklist } from '../api/mutations';
 import { matchesPresetCriteria } from '../lib/presetMatch';
 import { signalCount } from '../lib/signalCount';
 import { useToast } from '../lib/toast';
 
 const AMIT_FIT_ID = -1;
+const CUSTOM_SEARCH_ID = -2;
 
 function getPresetSummary(preset: Record<string, unknown>): string {
   const parts: string[] = [];
@@ -167,6 +170,7 @@ export default function OpportunityPage() {
 
   const queryClient = useQueryClient();
   const toast = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // Preset selection state — persisted in localStorage
   const [selectedPresetId, setSelectedPresetId] = useState<number | null>(() => {
@@ -206,15 +210,45 @@ export default function OpportunityPage() {
     [allPresetsRaw]
   );
 
+  // Parse ?custom= URL param into criteria object
+  const customCriteria = useMemo<CustomSearchCriteria | null>(() => {
+    const raw = searchParams.get('custom');
+    if (!raw) return null;
+    try {
+      const parsed = new URLSearchParams(decodeURIComponent(raw));
+      const criteria: CustomSearchCriteria = {};
+      if (parsed.get('city_code')) criteria.city_code = parsed.get('city_code')!;
+      if (parsed.get('category')) criteria.category = parsed.get('category')!;
+      const minPrice = parsed.get('min_price');
+      if (minPrice) criteria.min_price = parseInt(minPrice, 10);
+      const maxPrice = parsed.get('max_price');
+      if (maxPrice) criteria.max_price = parseInt(maxPrice, 10);
+      const minRooms = parsed.get('min_rooms');
+      if (minRooms) criteria.min_rooms = parseFloat(minRooms);
+      const maxRooms = parsed.get('max_rooms');
+      if (maxRooms) criteria.max_rooms = parseFloat(maxRooms);
+      return Object.keys(criteria).length > 0 ? criteria : null;
+    } catch {
+      return null;
+    }
+  }, [searchParams]);
+
   const isAmitFit = selectedPresetId === AMIT_FIT_ID;
+  const isCustom = selectedPresetId === CUSTOM_SEARCH_ID;
+
   const { data: presetPropsData, isLoading: presetLoading } =
-    usePresetProperties(isAmitFit ? null : selectedPresetId);
+    usePresetProperties(isAmitFit || isCustom ? null : selectedPresetId);
   const { data: amitFitData, isLoading: amitLoading } =
     useAmitFitProperties(isAmitFit);
-  const isLoading = isAmitFit ? amitLoading : presetLoading;
+  const { data: customData, isLoading: customLoading } =
+    useCustomSearch(isCustom ? customCriteria : null);
+
+  const isLoading = isAmitFit ? amitLoading : isCustom ? customLoading : presetLoading;
   const allItems = (
     isAmitFit
       ? (amitFitData?.properties ?? [])
+      : isCustom
+      ? (customData?.properties ?? [])
       : (presetPropsData?.properties ?? [])
   ) as Record<string, unknown>[];
 
@@ -247,6 +281,7 @@ export default function OpportunityPage() {
   useEffect(() => {
     if (allPresets.length === 0) return;
     if (selectedPresetId === AMIT_FIT_ID) return;
+    if (selectedPresetId === CUSTOM_SEARCH_ID) return;
     const stillVisible = allPresets.some(p => (p.id as number) === selectedPresetId);
     if (selectedPresetId === null || !stillVisible) {
       const firstId = allPresets[0].id as number;
@@ -254,6 +289,26 @@ export default function OpportunityPage() {
       localStorage.setItem('pdis_selected_preset', String(firstId));
     }
   }, [allPresets, selectedPresetId]);
+
+  // Auto-select CUSTOM_SEARCH_ID when ?custom= param is present
+  useEffect(() => {
+    if (customCriteria && selectedPresetId !== CUSTOM_SEARCH_ID) {
+      setSelectedPresetId(CUSTOM_SEARCH_ID);
+      setActiveStatFilter(null);
+    }
+  }, [customCriteria, selectedPresetId]);
+
+  // Recovery: if CUSTOM_SEARCH_ID selected but no criteria, fall back to first real preset
+  useEffect(() => {
+    if (selectedPresetId !== CUSTOM_SEARCH_ID) return;
+    if (customCriteria) return;
+    if (allPresets.length > 0) {
+      selectPreset(allPresets[0].id as number);
+    } else {
+      setSelectedPresetId(null);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPresetId, customCriteria, allPresets]);
 
   // Detect scan completion and refresh data
   const prevRunning = useRef(false);
@@ -311,7 +366,7 @@ export default function OpportunityPage() {
   );
 
   // Phase 2: split filtered into matching vs other based on preset criteria
-  const selectedPreset = isAmitFit
+  const selectedPreset = isAmitFit || isCustom
     ? null
     : (allPresets.find(p => (p.id as number) === selectedPresetId) ?? null);
 
@@ -352,7 +407,9 @@ export default function OpportunityPage() {
 
   function selectPreset(id: number) {
     setSelectedPresetId(id);
-    localStorage.setItem('pdis_selected_preset', String(id));
+    if (id !== CUSTOM_SEARCH_ID) {
+      localStorage.setItem('pdis_selected_preset', String(id));
+    }
     setActiveStatFilter(null);
   }
 
@@ -428,6 +485,35 @@ export default function OpportunityPage() {
 
         {/* Preset Pills */}
         <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+          {customCriteria && (
+            <button
+              key="custom-search"
+              onClick={() => selectPreset(CUSTOM_SEARCH_ID)}
+              className={`px-4 py-2 rounded-full whitespace-nowrap shrink-0 border transition-colors text-left flex items-center gap-2 ${
+                isCustom
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'bg-blue-50 text-blue-700 border-blue-200'
+              }`}
+            >
+              <span className="text-sm font-medium">Custom search</span>
+              <span
+                className="text-xs leading-none opacity-80 hover:opacity-100"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSearchParams({});
+                  if (allPresets.length > 0) {
+                    selectPreset(allPresets[0].id as number);
+                  } else {
+                    setSelectedPresetId(null);
+                  }
+                }}
+                role="button"
+                aria-label="Dismiss custom search"
+              >
+                ×
+              </span>
+            </button>
+          )}
           <button
             key="amit-fit"
             onClick={() => {

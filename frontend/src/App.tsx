@@ -3,7 +3,6 @@ import NavBar from './components/NavBar';
 import OpportunityPage from './pages/OpportunityPage';
 import FavoritesPage from './pages/FavoritesPage';
 import SearchPage from './pages/SearchPage';
-import SearchResultsPage from './pages/SearchResultsPage';
 import PropertyDetailPage from './pages/PropertyDetailPage';
 
 export default function App() {
@@ -16,7 +15,6 @@ export default function App() {
         <Route path="/listings" element={<FavoritesPage />} />
         <Route path="/favorites" element={<Navigate to="/listings" replace />} />
         <Route path="/search" element={<SearchPage />} />
-        <Route path="/search/results" element={<SearchResultsPage />} />
         <Route path="/property/:yad2Id" element={<PropertyDetailPage />} />
       </Routes>
       <NavBar />

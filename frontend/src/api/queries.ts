@@ -83,10 +83,33 @@ export function useFbGroups() {
   });
 }
 
-export function useOpenSearchPresets() {
+
+export interface CustomSearchCriteria {
+  city_code?: string;
+  category?: string;
+  min_price?: number;
+  max_price?: number;
+  min_rooms?: number;
+  max_rooms?: number;
+}
+
+export function useCustomSearch(criteria: CustomSearchCriteria | null) {
   return useQuery({
-    queryKey: ['openSearchPresets'],
-    queryFn: () => apiFetch<{ presets: Record<string, unknown>[] }>('/api/presets?is_active=false'),
+    queryKey: ['customSearch', JSON.stringify(criteria)],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (criteria?.city_code) params.set('city_code', criteria.city_code);
+      if (criteria?.category) params.set('category', criteria.category);
+      if (criteria?.min_price != null) params.set('min_price', String(criteria.min_price));
+      if (criteria?.max_price != null) params.set('max_price', String(criteria.max_price));
+      if (criteria?.min_rooms != null) params.set('min_rooms', String(criteria.min_rooms));
+      if (criteria?.max_rooms != null) params.set('max_rooms', String(criteria.max_rooms));
+      params.set('per_page', '2000');
+      return apiFetch<{ total: number; properties: Record<string, unknown>[] }>(
+        `/api/search/custom?${params}`
+      );
+    },
+    enabled: criteria !== null,
   });
 }
 

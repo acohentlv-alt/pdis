@@ -137,6 +137,111 @@ async def get_latest_preset_stats(category: str | None = Query(default=None)):
     return {"presets": [dict(r) for r in rows]}
 
 
+@router.get("/api/search/custom")
+async def custom_search(
+    city_code: str = Query(default="5000"),
+    category: str = Query(default="rent"),
+    min_price: Optional[int] = Query(default=None),
+    max_price: Optional[int] = Query(default=None),
+    min_rooms: Optional[float] = Query(default=None),
+    max_rooms: Optional[float] = Query(default=None),
+    page: int = Query(default=1),
+    per_page: int = Query(default=500),
+):
+    """Return properties matching ad-hoc criteria from the existing DB (no scan triggered)."""
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            # Find all preset IDs with the same city_code (mirrors get_preset_properties)
+            await cur.execute(
+                "SELECT id FROM search_presets WHERE city_code = %s",
+                (city_code,),
+            )
+            city_preset_ids = [r["id"] for r in await cur.fetchall()]
+
+            # Exclude any pure-FB preset from city scope (ad-hoc search is Yad2/Madlan world)
+            await cur.execute(
+                "SELECT id FROM search_presets WHERE extra_params->>'source' = 'facebook' LIMIT 1"
+            )
+            fb_row = await cur.fetchone()
+            if fb_row:
+                city_preset_ids = [pid for pid in city_preset_ids if pid != fb_row["id"]]
+
+            # Build conditions dynamically — same pattern as preset properties endpoint
+            conditions = [
+                "(p.preset_id = ANY(%s) OR p.preset_id IS NULL)",
+                "p.category = %s",
+                "p.is_active = TRUE",
+                "bl.id IS NULL",
+            ]
+            params: list = [city_preset_ids, category]
+
+            if min_price is not None:
+                conditions.append("p.price >= %s")
+                params.append(min_price)
+            if max_price is not None:
+                conditions.append("p.price <= %s")
+                params.append(max_price)
+            if min_rooms is not None:
+                conditions.append("p.rooms >= %s")
+                params.append(min_rooms)
+            if max_rooms is not None:
+                conditions.append("p.rooms <= %s")
+                params.append(max_rooms)
+
+            where_clause = " AND ".join(conditions)
+
+            # Count total
+            await cur.execute(
+                f"""
+                SELECT COUNT(*) AS total
+                FROM properties p
+                LEFT JOIN property_classifications pc ON pc.property_id = p.id
+                LEFT JOIN blacklist bl ON bl.property_id = p.id
+                WHERE {where_clause}
+                """,
+                tuple(params),
+            )
+            total_row = await cur.fetchone()
+            total = total_row["total"] if total_row else 0
+
+            # Fetch paginated results
+            offset = (page - 1) * per_page
+            params_with_pagination = params + [per_page, offset]
+
+            await cur.execute(
+                f"""
+                SELECT
+                    p.*,
+                    pc.signal_details,
+                    (
+                        SELECT ARRAY_AGG(DISTINCT p2.source)
+                        FROM property_matches pm
+                        JOIN properties p2 ON p2.id = CASE
+                            WHEN pm.property_id_a = p.id THEN pm.property_id_b
+                            ELSE pm.property_id_a END
+                        WHERE pm.property_id_a = p.id OR pm.property_id_b = p.id
+                    ) AS matched_sources
+                FROM properties p
+                LEFT JOIN property_classifications pc ON pc.property_id = p.id
+                LEFT JOIN blacklist bl ON bl.property_id = p.id
+                WHERE {where_clause}
+                ORDER BY
+                    COALESCE(p.days_on_market, 0) DESC,
+                    p.updated_at DESC
+                LIMIT %s OFFSET %s
+                """,
+                tuple(params_with_pagination),
+            )
+            rows = await cur.fetchall()
+
+    return {
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "properties": [dict(r) for r in rows],
+    }
+
+
 @router.get("/api/presets/{preset_id}/properties")
 async def get_preset_properties(
     preset_id: int,
@@ -702,42 +807,6 @@ async def scan_status():
     from pdis.scanner import get_scan_status
     return get_scan_status()
 
-
-class OpenSearchBody(BaseModel):
-    city_code: str = "5000"
-    min_price: int | None = None
-    max_price: int | None = None
-    min_rooms: float | None = None
-    max_rooms: float | None = None
-    category: str = "rent"
-
-
-@router.post("/api/scan/open")
-async def trigger_open_scan(body: OpenSearchBody):
-    """Creates a saved-search preset; does NOT scrape Yad2. Results come from the
-    existing DB — SearchResultsPage queries /api/presets/{id}/properties which
-    filters by city + category + price + rooms across all already-ingested rows."""
-    async with _db.pool.connection() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute(
-                """INSERT INTO search_presets
-                   (name, category, city_code, min_price, max_price, min_rooms, max_rooms, is_active)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, FALSE)
-                   RETURNING id""",
-                (
-                    f"Open search {datetime.now().strftime('%d.%m %H:%M')}",
-                    body.category,
-                    body.city_code,
-                    body.min_price,
-                    body.max_price,
-                    body.min_rooms,
-                    body.max_rooms,
-                ),
-            )
-            row = await cur.fetchone()
-        await conn.commit()
-
-    return {"status": "done", "preset_id": row["id"]}
 
 
 async def _run_scan_background(preset_id: int) -> None:

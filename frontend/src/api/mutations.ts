@@ -78,26 +78,6 @@ export function useRemoveBlacklist() {
   });
 }
 
-export function useOpenSearch() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (params: {
-      city_code?: string;
-      min_price?: number;
-      max_price?: number;
-      min_rooms?: number;
-      max_rooms?: number;
-      category?: string;
-    }) =>
-      apiFetch('/api/scan/open', {
-        method: 'POST',
-        body: JSON.stringify(params),
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['presetStats'] });
-    },
-  });
-}
 
 export function useAddFavorite() {
   const queryClient = useQueryClient();

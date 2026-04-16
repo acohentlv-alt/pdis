@@ -67,10 +67,9 @@ Token reuses `gh auth token` (scopes: `repo, gist, read:org, workflow`). If it s
 
 | Page | Route | Purpose |
 |------|-------|---------|
-| OpportunityPage | `/` | Main dashboard: opportunities/fullscan tabs, SummaryBar, filters. Also aliased at `/rent` and `/buy`. |
+| OpportunityPage | `/` | Main dashboard: preset pills (incl. Amit Fit and transient Custom Search via ?custom=), SummaryBar, filters. Also aliased at `/rent` and `/buy`. |
 | FavoritesPage | `/favorites` | Starred properties |
 | SearchPage | `/search` | Ad-hoc search form |
-| SearchResultsPage | `/search/results` | Past open search queries + results |
 | PropertyDetailPage | `/property/:yad2Id` | Full property detail + signals + timeline |
 
 ### Key Components
