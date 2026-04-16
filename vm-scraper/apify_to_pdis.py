@@ -337,25 +337,42 @@ def main() -> None:
     }
     url = f"{PDIS_API_URL}/api/ingest/facebook"
 
+    MAX_ATTEMPTS = 3
+    RETRY_WAIT_S = 60
+
     sent = 0
     with httpx.Client(timeout=300) as client:
         for i in range(0, len(posts), BATCH_SIZE):
             batch = posts[i:i + BATCH_SIZE]
-            print(f"POST batch {i // BATCH_SIZE + 1}: {len(batch)} posts...", flush=True)
-            t0 = time.time()
-            try:
-                resp = client.post(url, json={"posts": batch}, headers=headers)
-                resp.raise_for_status()
-                body = resp.json()
-            except httpx.HTTPStatusError as exc:
-                print(f"  FAIL {exc.response.status_code}: {exc.response.text[:300]}", flush=True)
-                continue
-            except Exception as exc:
-                print(f"  EXC: {exc}", flush=True)
-                continue
-            elapsed = time.time() - t0
-            sent += len(batch)
-            print(f"  OK in {elapsed:.1f}s: {json.dumps(body)[:200]}", flush=True)
+            batch_num = i // BATCH_SIZE + 1
+            success = False
+            for attempt in range(1, MAX_ATTEMPTS + 1):
+                print(f"POST batch {batch_num}: {len(batch)} posts (attempt {attempt}/{MAX_ATTEMPTS})...", flush=True)
+                t0 = time.time()
+                try:
+                    resp = client.post(url, json={"posts": batch}, headers=headers)
+                    resp.raise_for_status()
+                    body = resp.json()
+                    elapsed = time.time() - t0
+                    sent += len(batch)
+                    print(f"  OK in {elapsed:.1f}s: {json.dumps(body)[:200]}", flush=True)
+                    success = True
+                    break
+                except httpx.HTTPStatusError as exc:
+                    code = exc.response.status_code
+                    print(f"  FAIL {code}: {exc.response.text[:300]}", flush=True)
+                    # Retry only on 5xx; 4xx is permanent (auth, validation, etc.)
+                    if code < 500 or attempt == MAX_ATTEMPTS:
+                        break
+                except Exception as exc:
+                    print(f"  EXC: {exc}", flush=True)
+                    if attempt == MAX_ATTEMPTS:
+                        break
+                if attempt < MAX_ATTEMPTS:
+                    print(f"  retrying in {RETRY_WAIT_S}s...", flush=True)
+                    time.sleep(RETRY_WAIT_S)
+            if not success:
+                print(f"  batch {batch_num} dropped after {MAX_ATTEMPTS} attempts", flush=True)
 
     print(f"Done. {sent}/{len(posts)} posts POSTed.", flush=True)
 

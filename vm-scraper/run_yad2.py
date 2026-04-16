@@ -436,8 +436,12 @@ def fill_detail_for_missing(listings: list) -> list:
     return listings
 
 
-def post_to_backend(preset_id: int, listings: list) -> int:
-    """POST listings to /api/ingest/yad2. Returns HTTP status code."""
+def post_to_backend(preset_id: int, listings: list, max_attempts: int = 3, retry_wait_s: int = 60) -> int:
+    """POST listings to /api/ingest/yad2 with retry on transient failures.
+    Render's free-tier worker can return intermittent 500s when bg tasks are stacked
+    (worker recycling, transient pool/connectivity issues). Retry once or twice with
+    a wait so the next attempt hits a different worker state.
+    Returns the final HTTP status code."""
     url = f"{PDIS_API_URL}/api/ingest/yad2"
     payload = {
         "preset_id": preset_id,
@@ -447,21 +451,32 @@ def post_to_backend(preset_id: int, listings: list) -> int:
         "Content-Type": "application/json",
         "Authorization": f"Bearer {INGEST_SECRET}",
     }
-    try:
-        r = cf_requests.post(
-            url,
-            json=payload,
-            headers=headers,
-            impersonate="chrome",
-            timeout=60,
-        )
-        log.info(f"[preset {preset_id}] POST /api/ingest/yad2 → HTTP {r.status_code}")
-        if r.status_code not in (200, 201):
+    last_status = 0
+    for attempt in range(1, max_attempts + 1):
+        try:
+            r = cf_requests.post(
+                url,
+                json=payload,
+                headers=headers,
+                impersonate="chrome",
+                timeout=60,
+            )
+            last_status = r.status_code
+            log.info(f"[preset {preset_id}] POST /api/ingest/yad2 → HTTP {r.status_code} (attempt {attempt}/{max_attempts})")
+            if r.status_code in (200, 201):
+                return r.status_code
             log.warning(f"[preset {preset_id}] Backend response body: {r.text[:500]}")
-        return r.status_code
-    except Exception as exc:
-        log.error(f"[preset {preset_id}] POST failed: {exc}")
-        return 0
+            # Non-2xx — retry only on 5xx; 4xx is a permanent error (bad payload, auth, flag)
+            if r.status_code < 500:
+                return r.status_code
+        except Exception as exc:
+            log.error(f"[preset {preset_id}] POST failed (attempt {attempt}/{max_attempts}): {exc}")
+            last_status = 0
+        if attempt < max_attempts:
+            log.info(f"[preset {preset_id}] Retrying in {retry_wait_s}s...")
+            time.sleep(retry_wait_s)
+    log.error(f"[preset {preset_id}] All {max_attempts} attempts failed; final status {last_status}")
+    return last_status
 
 
 def fetch_presets() -> list:
