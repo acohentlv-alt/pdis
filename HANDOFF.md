@@ -50,6 +50,40 @@ Three parallel agents shipped on PDIS throughout the day. Net: **7 commits on ma
 
 ---
 
+## Late-afternoon update — investigation + live test + retry safety net (commits `ebe4b11`, `5209985`, `85bebd9`)
+
+After the day session wrote the handoff above, this agent ran a live test of the fire-and-forget fix at ~12:30 IDT (the test the day session said was "missed" — it actually happened, just later than 12:10).
+
+**Live test results:**
+- ✅ **Madlan** (via Render scheduled scan) — s176 done, 1207 listings, 275 new
+- ✅ **Yad2 4/6 presets** (8, 12, 13 ←first time Villas worked, 23) — `done`
+- ❌ **Yad2 2/6 presets** (9, 11) — silently lost. Render returned HTTP 500 from the synchronous handler before the bg task could create a session. Reproduction attempts from MacBook all returned 200 in <0.5s, so it's NOT a deterministic code bug — looks like transient Render-side state (worker recycling, brief pool/network hiccup).
+- ❌ **Facebook** — Apify HTTP 402, **out of credits**. Top up needed.
+
+**Three new commits to address the gaps:**
+1. **`ebe4b11`** — added `/api/debug/recent-errors` endpoint. Captures every unhandled FastAPI exception (with traceback) into an in-memory ring buffer of size 50. If a 500 fires tomorrow morning, `curl https://pdis-lsah.onrender.com/api/debug/recent-errors` returns the actual stack trace — no need for Render dashboard access. **Temporary** — remove or gate behind a debug flag once root cause is known.
+2. **`5209985`** — VM-side retry on 5xx. Both `vm-scraper/run_yad2.py` and `vm-scraper/apify_to_pdis.py` now retry up to 3x with 60s wait. 4xx is permanent (no retry). Already deployed to Oracle VM. Should reduce the silent-loss rate from today's ~33% to near zero.
+3. **`85bebd9`** — CLAUDE.md schedule fix. The doc said cron-job.org fires at 08:00 + 18:00; reality is **10:00 IDT** (verified from a screenshot of the cron-job.org dashboard). My earlier "Madlan didn't fire today" claim in this handoff was wrong — sessions s157–s164 at 07:02 UTC = 10:02 IDT WERE the cron's fire (the field `requested_by='user'` is misleading — it's set that way for cron-fired scans too). **Action item:** verify on cron-job.org dashboard whether there's a second daily slot.
+
+**Correction to "What's half-done" above:** the claim that today's Madlan didn't fire at 08:00 IDT is wrong — Madlan fired at 10:00 IDT (correct schedule), via cron, and ran end-to-end cleanly. The afternoon manual fire was on top of the cron's already-completed run.
+
+**Cleanup:** ~1485 synthetic test/probe rows were left in production Neon during this afternoon's investigation (`reproduce_*`, `qatest_*`, `verify_*`, `burst_*`, `probe*`, `fbverify_*`). All cleaned up before close — DB verified clean.
+
+## Updated "What to do next" (supersedes earlier list)
+
+1. **08:00 IDT — Yad2 VM auto-run.** Check `/api/scan/sessions?limit=20` after ~08:30 IDT. Expect 6 fresh `done` sessions. If any preset shows `error` or stuck `running`, **first thing**: `curl /api/debug/recent-errors` and capture the JSON. That tells us exactly what's raising the 500.
+2. **10:00 IDT — Madlan via cron AND FB VM run.** If Apify is topped up, FB will produce sessions; if not, FB will fail at the Apify step before even calling our API.
+3. **Top up Apify credits** (apify.com dashboard) so FB scraper works tomorrow.
+4. **Verify cron-job.org schedule** on dashboard — is it 10:00-only, or 10:00 + something else?
+5. If everything looks clean by mid-morning: **remove `/api/debug/recent-errors`** or gate it behind a `DEBUG_ENDPOINTS_ENABLED` env flag. Don't leave it on indefinitely.
+
+## Updated "Watch out for"
+
+- **FB volume guard rejects every daily batch.** Even when Apify works, the FB pipeline silently drops its 10–15 daily posts because the threshold is `max(10, prior_count * 0.1)` = 68 against ~689 prior FB rows. This bug existed before today and was confirmed during investigation. Separate brief needed — see TASKS.md "FB volume guard always rejects daily batch".
+- **Render free-tier cold starts are real.** cron-job.org's request to `/api/scan/scheduled` today took 13.77s to get a 200 response — that's the cold start, not actual work. The endpoint just schedules a bg task and returns. So a 13-sec response is normal/healthy, not a failure.
+
+---
+
 *Archived sessions:*
 - *TASKS_2026-04-16.md — this morning's TASKS (pre-day-session). Immutable.*
 - *HANDOFF_2026-04-15_night2.md — prior handoff from the overnight session. Immutable.*

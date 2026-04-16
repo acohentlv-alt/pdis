@@ -1,5 +1,5 @@
 # PDIS — Task List
-*April 16, 2026 (after day session — stale code cleanup + backend quick wins + fire-and-forget ingest)*
+*April 16, 2026 (after day session + late-afternoon investigation — fire-and-forget LIVE-tested, debug endpoint shipped, VM retry shipped)*
 
 ---
 
@@ -12,8 +12,16 @@
 - **events.py N+1 fix** (`7a6fb60`) — ~200 DB roundtrips/scan eliminated by LEFT JOIN on `properties` in the detection CTE. Logic unchanged.
 - **Open Search → Custom Search pill** (`f484b5a`) — quirky-heyrovsky agent. Results render as URL-driven `?custom=` on the main dashboard; `/search/results` page removed. Needs iPhone tap-through.
 
-### 12:10 IDT live test — NOT executed today
-Was planned but skipped when we ran past the window (deploy finished ~12:53). Tomorrow's 08:00 IDT automated run becomes the real first test of fire-and-forget.
+### 12:30 IDT live test — DID run (correction to earlier handoff claim)
+Fired all three sources together via SSH + curl:
+- **Madlan via Render scheduled scan** ✅ s176 done, 1207 listings, 275 new
+- **Yad2 VM (6 presets, 240 listings each)** — **4/6 ✅, 2/6 ❌** silently lost. ✅ presets 8, 12, 13 (first time Villas worked!), 23. ❌ presets 9 + 11 returned HTTP 500 from Render's synchronous handler — no session created, data lost. Reproduction attempts from MacBook all returned 200 in <0.5s, so 500s appear to be transient Render-side state (worker recycling, brief pool contention, etc.) not a deterministic code bug.
+- **Facebook VM** ❌ Apify returned **HTTP 402 Payment Required** — Apify credits exhausted. **Top up needed** for tomorrow's 10:00 IDT run.
+
+### Late-afternoon shipped — needs eyes tomorrow morning
+- **`/api/debug/recent-errors`** (`ebe4b11`) — temporary diagnostic. Captures every unhandled FastAPI exception (with traceback) into an in-memory ring buffer of size 50. If a 500 fires tomorrow at 08:00 IDT, `curl https://pdis-lsah.onrender.com/api/debug/recent-errors` returns it. **Should be removed or gated behind a debug flag once we understand the root cause.**
+- **VM-side retry on 5xx** (`5209985`) — `vm-scraper/run_yad2.py` and `vm-scraper/apify_to_pdis.py` now retry up to 3 times with 60s wait between attempts. 4xx responses are treated as permanent (no retry). Already deployed to Oracle VM at `/opt/pdis-yad2-scraper/run_yad2.py` and `/opt/pdis-fb-scraper/apify_to_pdis.py`. Trades a few extra minutes of run time on flaky days for near-zero silent data loss. **Tomorrow's 08:00 IDT VM run is the real test.**
+- **CLAUDE.md cron schedule corrected** (`85bebd9`) — was "08:00 and 18:00 IDT", actually fires at **10:00 IDT** (verified from cron-job.org dashboard screenshot). Second daily slot, if any, still unconfirmed — Alan to verify on dashboard.
 
 ### From prior sessions — still pending Alan's eyes
 - **PresetManager 2030-vision redesign** (commit `c66e7b7`) — manual iPhone QA per checklist in `TASKS_2026-04-15_night2.md`.
@@ -42,6 +50,15 @@ Today's work handled the peripheral cleanup (`export_fb_cookies.py`, `enumerate_
 
 ### 🆕 FB city bleed — non-TLV posts mislabeled as TLV
 Unchanged from this morning's TASKS. FB posts from Kfar Saba etc. get `address_city='תל אביב יפו'` because `vm-scraper/apify_to_pdis.py` hardcodes city per group via `GROUP_CITY_MAP`. Two fix options: (a) trust Haiku's neighborhood detection, skip posts where neighborhood is null AND text lacks TLV keywords; (b) add `default_city` column to `fb_groups` + validate Haiku output. Alan's call.
+
+### 🆕 FB volume guard always rejects daily batch
+Discovered during late-afternoon investigation. The `source=='facebook'` branch of the low-volume guard (`scanner.py:803-833`) computes threshold = `max(10, prior_count * 0.1)`. With **689 active FB rows**, threshold = **68**. The typical daily FB batch after Apify scraping + filtering is **10-15 posts**. So FB ingest **gets `suspicious_low_volume` and silently drops every day**. Reset the threshold for FB or use a different scraper-failure signal (e.g., compare against rolling 7-day median, or just trust any non-empty batch like we do for Yad2/Madlan now). Today's 10:00 IDT FB run hit this even before Apify ran out of credits.
+
+### 🆕 Mystery error — investigate (low priority)
+Session `s194` from late-afternoon reproduction has `error_message="server conn crashed?"`. That string doesn't exist anywhere in the codebase or git history. May be a manual annotation from a parallel session. Worth a glance tomorrow but not blocking.
+
+### 🆕 Remove or gate `/api/debug/recent-errors`
+Shipped today as a temporary diagnostic (`ebe4b11`). Once the intermittent ingest 500s are fully understood and fixed, remove this endpoint or gate it behind a `DEBUG_ENDPOINTS_ENABLED` env flag.
 
 ### 🧭 STRATEGIC — 7 bigger bets from Apr 15 product analysis
 Carry-forward unchanged. Priority order by leverage:
