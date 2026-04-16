@@ -21,11 +21,13 @@ async def init_pool() -> None:
     pool = AsyncConnectionPool(
         conninfo=settings.database_url,
         min_size=0,
-        max_size=10,
+        max_size=15,
         kwargs={"row_factory": dict_row},
         open=False,
-        # Short timeout so startup fails fast when DB is unavailable
-        timeout=5.0,
+        # Bumped to 15s to absorb concurrent VM ingest pipelines (Yad2 + FB) running
+        # alongside the Madlan scheduled scan. With max_size=15 we have headroom on
+        # Neon (free tier supports 100 concurrent connections).
+        timeout=15.0,
     )
     await pool.open(wait=False)
     logger.info("db.pool_opened")

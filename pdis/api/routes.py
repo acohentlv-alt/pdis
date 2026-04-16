@@ -824,6 +824,53 @@ async def _run_scan_background(preset_id: int) -> None:
         _scanner._scan_progress = None  # safety net — normally reset by _finish_session
 
 
+async def _mark_running_session_failed(preset_id: int, error_message: str) -> None:
+    """If a session row was created and is still 'running' for this preset, flip it
+    to 'error' so a crashed background task doesn't leave a stuck row."""
+    try:
+        async with _db.pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """UPDATE scan_sessions
+                       SET status = 'error',
+                           finished_at = NOW(),
+                           error_message = %s
+                       WHERE id = (
+                           SELECT id FROM scan_sessions
+                           WHERE preset_id = %s AND status = 'running'
+                           ORDER BY id DESC LIMIT 1
+                       )""",
+                    (error_message[:200], preset_id),
+                )
+            await conn.commit()
+    except Exception as cleanup_exc:
+        logger.error("api.ingest_cleanup_failed", preset_id=preset_id, error=str(cleanup_exc))
+
+
+async def _run_yad2_ingest_background(preset_id: int, listings: list[ScrapedListing]) -> None:
+    """Background wrapper for Yad2 VM ingest. Crashes flip the session row to 'error'
+    so the VM scraper run isn't silently lost."""
+    try:
+        await run_scan_from_listings(preset_id, listings, source="yad2")
+    except Exception as exc:
+        logger.error("api.yad2_ingest_background_error", preset_id=preset_id, error=str(exc), exc_info=True)
+        await _mark_running_session_failed(preset_id, f"yad2 ingest crashed: {exc}")
+
+
+async def _run_fb_ingest_background(preset_id: int, listings: list[ScrapedListing]) -> None:
+    """Background wrapper for Facebook ingest. Includes the warning-counter logic that
+    used to live in the synchronous handler. Crashes flip the session row to 'error'."""
+    try:
+        result = await run_scan_from_listings(preset_id, listings, source="facebook")
+        if result.get("status") == "suspicious_low_volume":
+            await _bump_fb_warning_counter()
+        elif result.get("status") == "done":
+            await _reset_fb_warning_counter()
+    except Exception as exc:
+        logger.error("api.fb_ingest_background_error", preset_id=preset_id, error=str(exc), exc_info=True)
+        await _mark_running_session_failed(preset_id, f"fb ingest crashed: {exc}")
+
+
 @router.post("/api/scan/{preset_id}")
 async def trigger_scan(preset_id: int, background_tasks: BackgroundTasks):
     from pdis.scanner import get_scan_status
@@ -2294,8 +2341,10 @@ async def log_reveal(body: LogRevealBody):
 
 
 @router.post("/api/ingest/facebook")
-async def fb_ingest(request: Request, body: FacebookIngestBody):
-    """Receive scraped FB posts from the Oracle VM scraper and run the full scan pipeline."""
+async def fb_ingest(request: Request, body: FacebookIngestBody, background_tasks: BackgroundTasks):
+    """Receive scraped FB posts from the Oracle VM scraper. Returns immediately;
+    the full scan pipeline runs as a background task to avoid Render request timeouts
+    when batches stack up."""
     from pdis.config import settings
 
     # Bearer auth against INGEST_SECRET
@@ -2322,15 +2371,8 @@ async def fb_ingest(request: Request, body: FacebookIngestBody):
 
     logger.info("api.fb_ingest_received", total_posts=len(body.posts), valid_listings=len(listings))
 
-    result = await run_scan_from_listings(preset_id, listings)
-
-    # Bump or reset warning counter based on outcome
-    if result.get("status") == "suspicious_low_volume":
-        await _bump_fb_warning_counter()
-    elif result.get("status") == "done":
-        await _reset_fb_warning_counter()
-
-    return result
+    background_tasks.add_task(_run_fb_ingest_background, preset_id, listings)
+    return {"status": "started", "preset_id": preset_id, "count": len(listings)}
 
 
 # ---------------------------------------------------------------------------
@@ -2384,8 +2426,10 @@ class Yad2IngestBody(BaseModel):
 
 
 @router.post("/api/ingest/yad2")
-async def yad2_ingest(request: Request, body: Yad2IngestBody):
-    """Receive scraped Yad2 forsale listings from the Oracle VM scraper."""
+async def yad2_ingest(request: Request, body: Yad2IngestBody, background_tasks: BackgroundTasks):
+    """Receive scraped Yad2 forsale listings from the Oracle VM scraper. Returns
+    immediately; the full scan pipeline runs as a background task to avoid Render
+    request timeouts on big presets (240 listings was hitting HTTP 500)."""
     from pdis.config import settings
 
     auth_header = request.headers.get("Authorization", "")
@@ -2414,8 +2458,8 @@ async def yad2_ingest(request: Request, body: Yad2IngestBody):
 
     logger.info("api.yad2_ingest_received", preset_id=body.preset_id, count=len(listings))
 
-    result = await run_scan_from_listings(body.preset_id, listings, source="yad2")
-    return result
+    background_tasks.add_task(_run_yad2_ingest_background, body.preset_id, listings)
+    return {"status": "started", "preset_id": body.preset_id, "count": len(listings)}
 
 
 # ---------------------------------------------------------------------------
