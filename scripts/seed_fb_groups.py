@@ -1,7 +1,7 @@
 """
 Seed the fb_groups table from fb_groups_discovered.json.
 
-Upserts all groups discovered by scripts/enumerate_fb_groups.py.
+Upserts all groups listed in scripts/fb_groups_discovered.json.
 Existing rows are updated (name, url, last_seen_at) but is_active is never touched
 — deactivate groups manually in the DB if needed.
 
@@ -28,7 +28,7 @@ INPUT_FILE = SCRIPT_DIR / "fb_groups_discovered.json"
 async def main():
     if not INPUT_FILE.exists():
         print(f"ERROR: {INPUT_FILE} not found.")
-        print("Run scripts/enumerate_fb_groups.py first.")
+        print("Populate scripts/fb_groups_discovered.json first (manually or via your own enumeration).")
         sys.exit(1)
 
     groups = json.loads(INPUT_FILE.read_text())

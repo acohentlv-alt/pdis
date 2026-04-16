@@ -107,7 +107,7 @@ Token reuses `gh auth token` (scopes: `repo, gist, read:org, workflow`). If it s
 - Gated by `FB_INGESTION_ENABLED` flag (must be true on Render)
 - Health tracked in `ingest_state` table (last_ok_at, warning counters); exposed at `GET /api/ingest/facebook/health`
 - Cost: ~$5.80/mo Apify net + ~$1.80/mo Haiku = ~$7.60/mo
-- Legacy Playwright scraper (`vm-scraper/run.py`) + cookies (`vm-scraper/fb_state.json`) are now unused but not yet deleted
+- Legacy Playwright scraper (`vm-scraper/run.py`) is unused but retained pending its own cleanup. Its cookie-export helper and other Playwright-era scripts have been removed.
 
 ### Facebook Marketplace (parked)
 - Different from FB Groups. Needs Playwright + perceptual image hashing.

@@ -381,7 +381,7 @@ export function SectionMoreFilters({
                 if (groups.length === 0) {
                   return (
                     <div className="text-xs text-gray-500 bg-yellow-50 rounded-2xl p-4">
-                      No Facebook groups discovered yet. Run <code className="bg-white px-1 rounded">scripts/enumerate_fb_groups.py</code> on your laptop, then <code className="bg-white px-1 rounded">scripts/seed_fb_groups.py</code> to populate this list.
+                      No Facebook groups discovered yet. Edit the catalog JSON on the VM and run <code className="bg-white px-1 rounded">scripts/seed_fb_groups.py</code> to populate this list.
                     </div>
                   );
                 }

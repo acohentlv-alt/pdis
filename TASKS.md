@@ -30,6 +30,11 @@ Activates the Yad2 click-to-reveal phone fetcher. Brief #2's behavior gate.
 
 ## NOT STARTED
 
+### 🧹 Playwright-era cleanup — `vm-scraper/run.py` + `tests/test_fb_parser.py`
+Leftovers from the FB legacy-code cleanup (today's session):
+- `vm-scraper/run.py` lines 388 and 431 still reference the deleted `export_fb_cookies.py`. Can't touch now — parallel agent has 147 uncommitted lines in this file. Clean once their work lands.
+- `tests/test_fb_parser.py` imports helpers from `vm-scraper/run.py`. If the parallel agent moves those helpers to `llm_parse.py`, tests break. Update imports when that happens.
+
 ### 🆕 FB city bleed — non-TLV posts mislabeled as TLV
 Tonight's investigation showed FB posts from Kfar Saba etc. get `address_city='תל אביב יפו'` because `vm-scraper/apify_to_pdis.py` uses `GROUP_CITY_MAP` to hardcode city per group. Haiku extracts neighborhood but city goes unchecked. **Two fix options:**
 - (a) Trust Haiku's neighborhood detection — skip posts where neighborhood is null AND text doesn't contain TLV keywords.
