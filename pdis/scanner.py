@@ -799,35 +799,15 @@ async def run_scan_from_listings(preset_id: int, listings: list[ScrapedListing],
     log = logger.bind(preset_id=preset_id, source=source)
 
     # Low-volume guard:
-    # - Facebook: firehose scan — compare against prior active count; low volume = scraper failure.
-    # - Yad2/Madlan: per-preset — only reject completely empty batches (even 4 listings is valid).
+    # - Facebook: sampling ingest by design (5 posts/group × 14 groups = 70 raw,
+    #   minus text drops + intent filter = ~10-20 POSTed per run). No lower bound
+    #   to enforce — removal detection is disabled for FB anyway (see ca608dc),
+    #   so a small batch can't nuke rows.
+    # - Yad2/Madlan: per-preset ingest. Completely empty batch = scraper hit a
+    #   block; anything non-empty is a valid partial result.
     if source == "facebook":
-        async with _db.pool.connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    "SELECT COUNT(*) AS cnt FROM properties WHERE source = %s AND is_active = TRUE",
-                    (source,),
-                )
-                row = await cur.fetchone()
-                prior_count = row["cnt"] if row else 0
-
-        # On first-ever ingest (prior_count=0) accept any non-empty batch;
-        # otherwise require at least max(10, 10% of prior) to reject scraper failures.
-        threshold = 1 if prior_count == 0 else max(10, int(prior_count * 0.1))
-        if len(listings) < threshold:
-            log.warning(
-                "scanner.fb_suspicious_low_volume",
-                received=len(listings),
-                prior_count=prior_count,
-                threshold=threshold,
-            )
-            return {
-                "status": "suspicious_low_volume",
-                "received": len(listings),
-                "prior_count": prior_count,
-            }
+        pass  # no threshold for sampling ingest
     else:
-        # Yad2/Madlan: per-preset ingest — reject only completely empty batches.
         if not listings:
             log.warning("scanner.ingest_empty_batch", source=source)
             return {

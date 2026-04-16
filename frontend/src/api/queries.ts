@@ -71,8 +71,8 @@ export function useClosedComps(yad2Id: string | undefined) {
 
 export function useAllPresets() {
   return useQuery({
-    queryKey: ['presets', 'all'],
-    queryFn: () => apiFetch<{ presets: Record<string, unknown>[] }>('/api/presets'),
+    queryKey: ['presets', 'active'],
+    queryFn: () => apiFetch<{ presets: Record<string, unknown>[] }>('/api/presets?is_active=true'),
   });
 }
 
