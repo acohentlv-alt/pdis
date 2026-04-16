@@ -169,7 +169,7 @@ run_scan(preset_id):
 - External cron (cron-job.org) POSTs to `POST /api/scan/scheduled` at 08:00 and 18:00 Israel time
 - Requires `Authorization: Bearer {CRON_SECRET}` header
 - Fires scan as background task, returns immediately
-- Boolean lock prevents overlapping scans (`_scan_running` flag)
+- DB-backed lock prevents overlapping scans — checks scan_sessions for status='running' within a 30-min stale window. Stale sessions auto-expire to 'error'.
 - `GET /api/scan/status` returns `{"running": true/false}`
 
 ---

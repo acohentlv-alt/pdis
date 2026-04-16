@@ -792,7 +792,7 @@ async def trigger_scheduled_scan(request: Request, background_tasks: BackgroundT
 
     # Check if scan already running
     from pdis.scanner import get_scan_status, scheduled_scan
-    status = get_scan_status()
+    status = await get_scan_status()
     if status["running"]:
         raise HTTPException(status_code=409, detail="Scan already in progress")
 
@@ -805,34 +805,29 @@ async def trigger_scheduled_scan(request: Request, background_tasks: BackgroundT
 async def scan_status():
     """Check if a scan is currently running."""
     from pdis.scanner import get_scan_status
-    return get_scan_status()
+    return await get_scan_status()
 
 
 
 async def _run_scan_background(preset_id: int) -> None:
-    """Background wrapper for per-preset scan — uses the same lock as scheduled scans."""
-    import time as _time
+    """Background wrapper for per-preset scan — uses the same DB-backed lock as scheduled scans."""
     import pdis.scanner as _scanner
-    global_running = _scanner.get_scan_status()
+    global_running = await _scanner.get_scan_status()
     if global_running["running"]:
         logger.warning("api.scan_skipped_already_running", preset_id=preset_id)
         return
-    _scanner._scan_running = True
-    _scanner._scan_started_at = _time.time()
     try:
         await run_scan(preset_id)
     except Exception as exc:
         logger.error("api.scan_background_error", preset_id=preset_id, error=str(exc))
     finally:
-        _scanner._scan_running = False
-        _scanner._scan_started_at = None
         _scanner._scan_progress = None  # safety net — normally reset by _finish_session
 
 
 @router.post("/api/scan/{preset_id}")
 async def trigger_scan(preset_id: int, background_tasks: BackgroundTasks):
     from pdis.scanner import get_scan_status
-    status = get_scan_status()
+    status = await get_scan_status()
     if status["running"]:
         raise HTTPException(status_code=409, detail="Scan already in progress")
     background_tasks.add_task(_run_scan_background, preset_id)
@@ -1876,7 +1871,7 @@ async def _recompute_amit_fit_for_scope(
             return 0, None
 
         from pdis.scanner import get_scan_status
-        if get_scan_status().get("running"):
+        if (await get_scan_status()).get("running"):
             logger.info(
                 "amit_fit.recompute.scan_in_progress",
                 count=len(property_ids),

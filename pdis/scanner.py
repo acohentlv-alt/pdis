@@ -4,7 +4,6 @@ Scanner orchestrator: load preset → scrape → upsert → snapshots → update
 
 import hashlib
 import json
-import time as _time
 
 import structlog
 
@@ -19,8 +18,7 @@ from pdis.config import settings
 logger = structlog.get_logger(__name__)
 log = logger
 
-_scan_running = False
-_scan_started_at: float | None = None
+_SCAN_STALE_MINUTES = 30
 _scan_progress: int | None = None   # None when idle, 0-100 while running
 
 
@@ -800,31 +798,43 @@ async def run_scan_from_listings(preset_id: int, listings: list[ScrapedListing],
     """
     log = logger.bind(preset_id=preset_id, source=source)
 
-    # Low-volume guard: compare against prior active property count for this source
-    async with _db.pool.connection() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute(
-                "SELECT COUNT(*) AS cnt FROM properties WHERE source = %s AND is_active = TRUE",
-                (source,),
-            )
-            row = await cur.fetchone()
-            prior_count = row["cnt"] if row else 0
+    # Low-volume guard:
+    # - Facebook: firehose scan — compare against prior active count; low volume = scraper failure.
+    # - Yad2/Madlan: per-preset — only reject completely empty batches (even 4 listings is valid).
+    if source == "facebook":
+        async with _db.pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT COUNT(*) AS cnt FROM properties WHERE source = %s AND is_active = TRUE",
+                    (source,),
+                )
+                row = await cur.fetchone()
+                prior_count = row["cnt"] if row else 0
 
-    # On first-ever ingest (prior_count=0) accept any non-empty batch;
-    # otherwise require at least max(10, 10% of prior) to reject scraper failures.
-    threshold = 1 if prior_count == 0 else max(10, int(prior_count * 0.1))
-    if len(listings) < threshold:
-        log.warning(
-            "scanner.fb_suspicious_low_volume",
-            received=len(listings),
-            prior_count=prior_count,
-            threshold=threshold,
-        )
-        return {
-            "status": "suspicious_low_volume",
-            "received": len(listings),
-            "prior_count": prior_count,
-        }
+        # On first-ever ingest (prior_count=0) accept any non-empty batch;
+        # otherwise require at least max(10, 10% of prior) to reject scraper failures.
+        threshold = 1 if prior_count == 0 else max(10, int(prior_count * 0.1))
+        if len(listings) < threshold:
+            log.warning(
+                "scanner.fb_suspicious_low_volume",
+                received=len(listings),
+                prior_count=prior_count,
+                threshold=threshold,
+            )
+            return {
+                "status": "suspicious_low_volume",
+                "received": len(listings),
+                "prior_count": prior_count,
+            }
+    else:
+        # Yad2/Madlan: per-preset ingest — reject only completely empty batches.
+        if not listings:
+            log.warning("scanner.ingest_empty_batch", source=source)
+            return {
+                "status": "suspicious_low_volume",
+                "received": 0,
+                "prior_count": 0,
+            }
 
     session_id = await _create_session(preset_id)
     log = log.bind(session_id=session_id)
@@ -952,14 +962,47 @@ async def run_all_scans() -> list[dict]:
     return results
 
 
-async def scheduled_scan() -> dict:
-    """Called by the cron endpoint. Runs all scans with lock protection."""
-    global _scan_running, _scan_started_at
-    if _scan_running:
-        return {"status": "skipped", "reason": "scan already running"}
+async def _expire_stale_running_sessions() -> int:
+    """Mark scan_sessions stuck in 'running' for > _SCAN_STALE_MINUTES as errored.
+    Returns count expired."""
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                f"""
+                UPDATE scan_sessions
+                   SET status = 'error',
+                       finished_at = NOW(),
+                       error_message = COALESCE(error_message, 'stale — auto-expired after {_SCAN_STALE_MINUTES}min')
+                 WHERE status = 'running'
+                   AND started_at < NOW() - INTERVAL '{_SCAN_STALE_MINUTES} minutes'
+                """
+            )
+            expired = cur.rowcount or 0
+        await conn.commit()
+    if expired > 0:
+        log.warning("scanner.stale_sessions_expired", count=expired)
+    return expired
 
-    _scan_running = True
-    _scan_started_at = _time.time()
+
+async def _is_scan_running() -> bool:
+    """True if any scan_session is 'running' within the stale window."""
+    await _expire_stale_running_sessions()
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                f"""
+                SELECT 1 FROM scan_sessions
+                 WHERE status = 'running'
+                   AND started_at >= NOW() - INTERVAL '{_SCAN_STALE_MINUTES} minutes'
+                 LIMIT 1
+                """
+            )
+            row = await cur.fetchone()
+    return row is not None
+
+
+async def scheduled_scan() -> dict:
+    """Called by the cron endpoint. Runs all scans — DB-backed lock checked by caller."""
     try:
         results = await run_all_scans()
         return {"status": "done", "presets": len(results), "results": results}
@@ -967,18 +1010,13 @@ async def scheduled_scan() -> dict:
         log.error("scan.scheduled.error", error=str(e))
         return {"status": "error", "error": str(e)}
     finally:
-        _scan_running = False
-        _scan_started_at = None
-        # _scan_progress is reset per-session in _finish_session; reset here as safety net
-        # Scheduled/cron scans do NOT surface progress in UI (activeScanPresetId === null)
-        # so this only matters if _finish_session threw before resetting.
         global _scan_progress
         _scan_progress = None
 
 
-def get_scan_status() -> dict:
-    """Return current scan running state. Module state is authoritative — no DB query."""
+async def get_scan_status() -> dict:
+    """Current scan running state. DB-backed lock + module progress."""
     return {
-        "running": _scan_running,
+        "running": await _is_scan_running(),
         "progress": _scan_progress,
     }

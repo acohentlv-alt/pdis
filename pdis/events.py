@@ -32,7 +32,9 @@ async def detect_events(session_id: int, preset_id: int) -> int:
 
             prev_session_id = prev_session_row["id"]
 
-            # Compare current vs previous snapshots in one query
+            # Compare current vs previous snapshots in one query.
+            # LEFT JOIN properties to pull first_seen + yad2_date_added up-front,
+            # eliminating the per-row SELECT that caused ~200 DB roundtrips per session.
             await cur.execute(
                 """
                 WITH current_snap AS (
@@ -50,9 +52,12 @@ async def detect_events(session_id: int, preset_id: int) -> int:
                     c.price AS new_price, p.price AS old_price,
                     c.description_hash AS new_desc_hash, p.description_hash AS old_desc_hash,
                     c.image_hash AS new_img_hash, p.image_hash AS old_img_hash,
-                    p.property_id IS NULL AS is_new
+                    p.property_id IS NULL AS is_new,
+                    pr.first_seen AS prop_first_seen,
+                    pr.yad2_date_added AS prop_yad2_date_added
                 FROM current_snap c
                 LEFT JOIN prev_snap p ON p.property_id = c.property_id
+                LEFT JOIN properties pr ON pr.id = c.property_id
                 """,
                 (session_id, prev_session_id),
             )
@@ -65,16 +70,15 @@ async def detect_events(session_id: int, preset_id: int) -> int:
                 pid = row["property_id"]
 
                 if row["is_new"]:
-                    # Check if this is truly new or a relisting by comparing yad2_date_added
-                    await cur.execute(
-                        "SELECT first_seen, yad2_date_added FROM properties WHERE id = %s", (pid,)
-                    )
-                    prop = await cur.fetchone()
-                    if not prop:
+                    # Check if this is truly new or a relisting by comparing yad2_date_added.
+                    # first_seen + yad2_date_added are already in the row via the JOIN above.
+                    prop_first_seen = row["prop_first_seen"]
+                    if prop_first_seen is None:
+                        # Property row missing — shouldn't happen, but handle gracefully
                         events.append((pid, session_id, "new_listing", None, None))
                         continue
 
-                    if prop["first_seen"].isoformat()[:10] == today_str:
+                    if prop_first_seen.isoformat()[:10] == today_str:
                         # First seen today — genuinely new listing
                         events.append((pid, session_id, "new_listing", None, None))
                     else:
@@ -82,8 +86,8 @@ async def detect_events(session_id: int, preset_id: int) -> int:
                         # Only mark as relisting if yad2_date_added changed
                         # (meaning seller re-posted the listing).
                         # If yad2_date_added is the same, it's just scan inconsistency.
-                        # We don't have the new date_added here (it's in the upserted property),
-                        # so for now, DON'T mark as relisting — it's almost always a false positive.
+                        # prop_yad2_date_added is available from the JOIN for future use.
+                        # For now, DON'T mark as relisting — almost always a false positive.
                         # A real relisting will be caught when first_seen changes.
                         pass  # Skip — not a real relisting, just scan gap
                     continue
