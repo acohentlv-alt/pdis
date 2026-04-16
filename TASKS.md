@@ -39,9 +39,27 @@ Unchanged. Covers 4.5% of TLV/Haifa only. SSH to VM, check `govmap` tmux session
 ### Flip `YAD2_PHONE_FETCH_ENABLED=true` on Render
 Activates the Yad2 click-to-reveal phone fetcher. Brief #2's behavior gate.
 
+### Enter Florentin rent feature adjustments via unlocked UI
+Shipped `0f97418` unlocked Pricing Targets + Feature Adjustments for rent presets in PresetManager. Amit's rent-side modifiers are NOT yet in DB:
+- Parking in rent: +500-1000 ₪/month
+- Mamad in rent: +600 ₪/month
+- Elevator / walk-up-floor effect on rent price
+Open a rent preset (e.g., "TLV Rent - Madlan" or "TLV Rent - Full Scan") in the preset editor, scroll to "Feature Adjustments (Amit Fit)", enter values, save. 5-min task.
+
 ---
 
 ## NOT STARTED
+
+### 🆕 PresetManager — "Show hidden presets" toggle
+Today's commit `0de9b52` filters disabled presets out of the PresetManager list. When Alan toggles a preset OFF (green switch), it disappears entirely — looks like deletion even though `is_active=FALSE` keeps the row safe. No UI path to recover a hidden preset.
+Fix: add a small "Show hidden" toggle at the top of PresetManager (default OFF). When ON, list also renders disabled presets greyed out so Alan can re-enable them. Backend already supports it — `GET /api/presets?active=false` or similar. `/plan → /review → /exec`.
+
+### 🆕 Yad2 description placeholder garbage
+Yad2's feed API returns some descriptions with unresolved template tokens like `$HomeNum`, `$Floor_text`, `$TotalFloor_text`, `$FurnitureInfo`, `$Tadiran_text`, `$PandorDoors_text`, etc. Our `pdis/scraper.py` stores them raw. Example: property `25u9w93o` (Florentin rent 5200₪/63m²) — description is mostly unreadable placeholder soup in the first paragraph. Two fix approaches:
+- **Proper:** substitute tokens with structured Yad2 fields we already have (`floor`, `floor_count`, `furniture_info`, etc.) inside `scraper.py`'s description extraction.
+- **Crude:** strip anything matching `\$[A-Za-z_]+\$?` from description before storing.
+Needs its own `/plan → /review → /exec` cycle.
+
 
 ### 🧹 Playwright-era cleanup — delete `vm-scraper/run.py` + fix `tests/test_fb_parser.py`
 Today's work handled the peripheral cleanup (`export_fb_cookies.py`, `enumerate_fb_groups.py`, `cleanup_fb_broken_rows.py`, 147-line WIP in run.py, stale `:388` reference). The big piece remains:
