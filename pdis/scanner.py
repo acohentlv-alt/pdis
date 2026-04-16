@@ -834,6 +834,10 @@ async def run_scan_from_listings(preset_id: int, listings: list[ScrapedListing],
 
         log.info("scanner.ingest_upserted", total=total, new=new_count)
 
+        # Fetch square_meter_build from detail API for properties that don't have it
+        if source == "yad2":
+            await _backfill_built_sqm(listings, log)
+
         from pdis.events import detect_events
         from pdis.classification import persist_signals_batch
         from pdis.matching import find_matches, find_fb_cross_source_matches, detect_customer_relistings, backfill_year_built_from_matches, backfill_year_built_from_buildings

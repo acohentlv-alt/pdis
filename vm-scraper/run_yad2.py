@@ -152,7 +152,17 @@ def _parse_listing(item: dict) -> "dict | None":
     link_token = item.get("id") or item.get("link_token", "")
     listing_url = f"{YAD2_BASE_URL}/item/{link_token}" if link_token else ""
 
-    description = item.get("search_text") or item.get("address_more") or None
+    raw_description = item.get("search_text") or item.get("address_more") or None
+    if raw_description:
+        # Strip Yad2's unresolved template tokens like $HomeNum, $Floor_text, $FurnitureInfo
+        cleaned = re.sub(r"\$[A-Za-z_]+", "", raw_description)
+        # Collapse comma debris like ", , " → ", "
+        cleaned = re.sub(r"\s*,\s*,\s*", ", ", cleaned)
+        # Collapse whitespace runs and trim
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        description = cleaned if cleaned else None
+    else:
+        description = None
 
     coords = item.get("coordinates") or {}
     latitude = None
