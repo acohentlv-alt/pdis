@@ -446,8 +446,6 @@ export function SectionPricingTargets({
   neighborhoodExpanded,
   setNeighborhoodExpanded,
 }: PricingTargetsProps) {
-  if (form.category !== 'forsale') return null;
-
   return (
     <div className="border-t border-gray-100 pt-4">
       <button
@@ -560,8 +558,6 @@ export function SectionFeatureAdjustments({
   faHoodExpanded,
   setFaHoodExpanded,
 }: FeatureAdjustmentsProps) {
-  if (form.category !== 'forsale') return null;
-
   return (
     <div className="border-t border-gray-100 pt-4">
       <button

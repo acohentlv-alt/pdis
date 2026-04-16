@@ -123,11 +123,11 @@ export function usePresetProperties(presetId: number | null) {
   });
 }
 
-export function useAmitFitProperties(enabled: boolean) {
+export function useAmitFitProperties(category: 'rent' | 'forsale', enabled: boolean) {
   return useQuery({
-    queryKey: ['amitFitProperties'],
+    queryKey: ['amitFitProperties', category],
     queryFn: () => apiFetch<{ total: number; properties: Record<string, unknown>[] }>(
-      '/api/amit-fit/properties?per_page=2000'
+      `/api/amit-fit/properties?per_page=2000&category=${category}`
     ),
     enabled,
   });

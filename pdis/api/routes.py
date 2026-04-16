@@ -702,20 +702,30 @@ async def clone_preset(preset_id: int):
 async def get_amit_fit_properties(
     page: int = Query(default=1),
     per_page: int = Query(default=500),
+    category: str | None = Query(default=None),
 ):
-    """Return all active properties that have buyer_fit_tags, sorted by amit_pct_vs_preferred ASC."""
+    """Return active properties that have buyer_fit_tags, sorted by amit_pct_vs_preferred ASC.
+
+    Optional ?category=rent or ?category=forsale filters by the property's own category column.
+    """
+    if category is not None and category not in ("rent", "forsale"):
+        raise HTTPException(status_code=400, detail="category must be 'rent' or 'forsale'")
+
     async with _db.pool.connection() as conn:
         async with conn.cursor() as cur:
-            # Get all active preset IDs (all sources, including FB)
+            # Get all active preset IDs (category filtering is done on p.category, not preset category)
             await cur.execute("SELECT id FROM search_presets WHERE is_active = TRUE")
             preset_ids = [r["id"] for r in await cur.fetchall()]
 
             if not preset_ids:
                 return {"total": 0, "page": page, "per_page": per_page, "properties": []}
 
+            category_clause = " AND p.category = %s" if category else ""
+
             # Count total
+            count_params = (preset_ids, category) if category else (preset_ids,)
             await cur.execute(
-                """
+                f"""
                 SELECT COUNT(*) AS total
                 FROM properties p
                 LEFT JOIN property_classifications pc ON pc.property_id = p.id
@@ -724,15 +734,17 @@ async def get_amit_fit_properties(
                   AND p.is_active = TRUE
                   AND bl.id IS NULL
                   AND jsonb_array_length(COALESCE(pc.signal_details->'buyer_fit_tags', '[]'::jsonb)) > 0
+                  {category_clause}
                 """,
-                (preset_ids,),
+                count_params,
             )
             total_row = await cur.fetchone()
             total = total_row["total"] if total_row else 0
 
             offset = (page - 1) * per_page
+            select_params = (preset_ids, category, per_page, offset) if category else (preset_ids, per_page, offset)
             await cur.execute(
-                """
+                f"""
                 SELECT p.*, pc.signal_details,
                     (
                         SELECT ARRAY_AGG(DISTINCT p2.source)
@@ -749,11 +761,12 @@ async def get_amit_fit_properties(
                   AND p.is_active = TRUE
                   AND bl.id IS NULL
                   AND jsonb_array_length(COALESCE(pc.signal_details->'buyer_fit_tags', '[]'::jsonb)) > 0
+                  {category_clause}
                 ORDER BY (pc.signal_details->>'amit_pct_vs_preferred')::float ASC NULLS LAST,
                          p.updated_at DESC
                 LIMIT %s OFFSET %s
                 """,
-                (preset_ids, per_page, offset),
+                select_params,
             )
             rows = await cur.fetchall()
 

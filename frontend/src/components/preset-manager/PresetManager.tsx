@@ -76,13 +76,13 @@ export default function PresetManager({ open, onClose, category }: PresetManager
   const [pricingExpanded, setPricingExpanded] = useState(false);
   const [neighborhoodExpanded, setNeighborhoodExpanded] = useState<Record<number, boolean>>({});
 
-  const isForSale = form.category === 'forsale';
-  const { data: thresholdsData } = useThresholds('forsale', open && isForSale);
+  const hasAmitSections = form.category === 'forsale';
+  const { data: thresholdsData } = useThresholds('forsale', open && hasAmitSections);
 
   const seededKeyRef = useRef<string | null>(null);
 
   const upsertFeatureAdjustments = useUpsertFeatureAdjustments();
-  const { data: faData } = useFeatureAdjustments('forsale', open && isForSale);
+  const { data: faData } = useFeatureAdjustments('forsale', open && hasAmitSections);
 
   const [faTargets, setFaTargets] = useState<FaState>({});
   const [faExpanded, setFaExpanded] = useState(false);

@@ -14,7 +14,8 @@ import { matchesPresetCriteria } from '../lib/presetMatch';
 import { signalCount } from '../lib/signalCount';
 import { useToast } from '../lib/toast';
 
-const AMIT_FIT_ID = -1;
+const AMIT_FIT_RENT_ID = -1;
+const AMIT_FIT_BUY_ID = -3;
 const CUSTOM_SEARCH_ID = -2;
 
 function getPresetSummary(preset: Record<string, unknown>): string {
@@ -233,20 +234,26 @@ export default function OpportunityPage() {
     }
   }, [searchParams]);
 
-  const isAmitFit = selectedPresetId === AMIT_FIT_ID;
+  const isAmitFitRent = selectedPresetId === AMIT_FIT_RENT_ID;
+  const isAmitFitBuy = selectedPresetId === AMIT_FIT_BUY_ID;
+  const isAmitFit = isAmitFitRent || isAmitFitBuy;
   const isCustom = selectedPresetId === CUSTOM_SEARCH_ID;
 
   const { data: presetPropsData, isLoading: presetLoading } =
     usePresetProperties(isAmitFit || isCustom ? null : selectedPresetId);
-  const { data: amitFitData, isLoading: amitLoading } =
-    useAmitFitProperties(isAmitFit);
+  const { data: amitFitRentData, isLoading: amitRentLoading } =
+    useAmitFitProperties('rent', isAmitFitRent);
+  const { data: amitFitBuyData, isLoading: amitBuyLoading } =
+    useAmitFitProperties('forsale', isAmitFitBuy);
   const { data: customData, isLoading: customLoading } =
     useCustomSearch(isCustom ? customCriteria : null);
 
-  const isLoading = isAmitFit ? amitLoading : isCustom ? customLoading : presetLoading;
+  const isLoading = isAmitFitRent ? amitRentLoading : isAmitFitBuy ? amitBuyLoading : isCustom ? customLoading : presetLoading;
   const allItems = (
-    isAmitFit
-      ? (amitFitData?.properties ?? [])
+    isAmitFitRent
+      ? (amitFitRentData?.properties ?? [])
+      : isAmitFitBuy
+      ? (amitFitBuyData?.properties ?? [])
       : isCustom
       ? (customData?.properties ?? [])
       : (presetPropsData?.properties ?? [])
@@ -280,7 +287,8 @@ export default function OpportunityPage() {
   // Auto-select first preset if none selected or selection no longer visible
   useEffect(() => {
     if (allPresets.length === 0) return;
-    if (selectedPresetId === AMIT_FIT_ID) return;
+    if (selectedPresetId === AMIT_FIT_RENT_ID) return;
+    if (selectedPresetId === AMIT_FIT_BUY_ID) return;
     if (selectedPresetId === CUSTOM_SEARCH_ID) return;
     const stillVisible = allPresets.some(p => (p.id as number) === selectedPresetId);
     if (selectedPresetId === null || !stillVisible) {
@@ -413,6 +421,9 @@ export default function OpportunityPage() {
     setActiveStatFilter(null);
   }
 
+  // Note: AMIT_FIT_RENT_ID = -1 matches the old single-sentinel value, so existing
+  // localStorage entries stored as -1 automatically resolve to the Rent pill.
+
   function handleStatClick(stat: string) {
     if (stat === 'scanned') {
       setActiveStatFilter(null);
@@ -515,19 +526,35 @@ export default function OpportunityPage() {
             </button>
           )}
           <button
-            key="amit-fit"
+            key="amit-fit-rent"
             onClick={() => {
-              setSelectedPresetId(AMIT_FIT_ID);
-              localStorage.setItem('pdis_selected_preset', String(AMIT_FIT_ID));
+              setSelectedPresetId(AMIT_FIT_RENT_ID);
+              localStorage.setItem('pdis_selected_preset', String(AMIT_FIT_RENT_ID));
               setActiveStatFilter(null);
             }}
             className={`px-4 py-2 rounded-full whitespace-nowrap shrink-0 border transition-colors text-left ${
-              isAmitFit
+              isAmitFitRent
                 ? 'bg-emerald-600 text-white border-emerald-600'
                 : 'bg-emerald-50 text-emerald-700 border-emerald-200'
             }`}
           >
-            <span className="block text-sm font-medium">Amit Fit</span>
+            <span className="block text-sm font-medium">Amit Fit Rent</span>
+            <span className="block text-[10px] opacity-70">Across all hoods</span>
+          </button>
+          <button
+            key="amit-fit-buy"
+            onClick={() => {
+              setSelectedPresetId(AMIT_FIT_BUY_ID);
+              localStorage.setItem('pdis_selected_preset', String(AMIT_FIT_BUY_ID));
+              setActiveStatFilter(null);
+            }}
+            className={`px-4 py-2 rounded-full whitespace-nowrap shrink-0 border transition-colors text-left ${
+              isAmitFitBuy
+                ? 'bg-emerald-600 text-white border-emerald-600'
+                : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+            }`}
+          >
+            <span className="block text-sm font-medium">Amit Fit Buy</span>
             <span className="block text-[10px] opacity-70">Across all hoods</span>
           </button>
           {allPresets.map(p => {
