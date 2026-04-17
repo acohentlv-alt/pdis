@@ -92,16 +92,32 @@ async def list_neighborhoods(city_code: str = Query(default=None)):
 # ---------------------------------------------------------------------------
 
 @router.get("/api/presets")
-async def list_presets(is_active: bool | None = Query(default=None)):
+async def list_presets(
+    visible: bool | None = Query(default=None),
+    scan_enabled: bool | None = Query(default=None),
+    is_active: bool | None = Query(default=None, deprecated=True),
+):
+    # is_active is a deprecated alias for scan_enabled
+    effective_scan_enabled = scan_enabled if scan_enabled is not None else is_active
+
+    conditions = []
+    params: list = []
+    if visible is not None:
+        conditions.append("is_visible = %s")
+        params.append(visible)
+    if effective_scan_enabled is not None:
+        conditions.append("scan_enabled = %s")
+        params.append(effective_scan_enabled)
+
+    where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    order_clause = "ORDER BY created_at DESC" if conditions else "ORDER BY id"
+
     async with _db.pool.connection() as conn:
         async with conn.cursor() as cur:
-            if is_active is not None:
-                await cur.execute(
-                    "SELECT * FROM search_presets WHERE is_active = %s ORDER BY created_at DESC",
-                    (is_active,),
-                )
-            else:
-                await cur.execute("SELECT * FROM search_presets ORDER BY id")
+            await cur.execute(
+                f"SELECT * FROM search_presets {where_clause} {order_clause}",
+                params if params else None,
+            )
             rows = await cur.fetchall()
     return {"presets": [dict(r) for r in rows]}
 
@@ -447,7 +463,7 @@ async def list_active_fb_groups():
                 SELECT DISTINCT fg.group_id, fg.name, fg.url
                 FROM fb_groups fg
                 JOIN search_presets sp
-                  ON sp.is_active = TRUE
+                  ON sp.scan_enabled = TRUE
                  AND sp.extra_params->>'source' = 'facebook'
                  AND fg.group_id = ANY(
                        SELECT jsonb_array_elements_text(COALESCE(sp.extra_params->'fb_groups', '[]'::jsonb))
@@ -497,8 +513,9 @@ async def create_preset(request: Request):
                 """
                 INSERT INTO search_presets
                     (name, category, city_code, area_code, neighborhood, property_types,
-                     min_price, max_price, min_rooms, max_rooms, extra_params, is_active)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     min_price, max_price, min_rooms, max_rooms, extra_params,
+                     scan_enabled, is_visible)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING *
                 """,
                 (
@@ -513,7 +530,8 @@ async def create_preset(request: Request):
                     body.get("min_rooms"),
                     body.get("max_rooms"),
                     extra_params_json,
-                    body.get("is_active", True),
+                    body.get("scan_enabled", True),
+                    body.get("is_visible", True),
                 ),
             )
             row = await cur.fetchone()
@@ -586,7 +604,8 @@ async def update_preset(preset_id: int, request: Request):
                     min_rooms = %s,
                     max_rooms = %s,
                     extra_params = %s,
-                    is_active = COALESCE(%s, is_active),
+                    scan_enabled = COALESCE(%s, scan_enabled),
+                    is_visible = COALESCE(%s, is_visible),
                     updated_at = NOW()
                 WHERE id = %s
                 RETURNING *
@@ -603,7 +622,8 @@ async def update_preset(preset_id: int, request: Request):
                     body.get("min_rooms"),
                     body.get("max_rooms"),
                     extra_params_json,
-                    body.get("is_active"),
+                    body.get("scan_enabled"),
+                    body.get("is_visible"),
                     preset_id,
                 ),
             )
@@ -649,14 +669,32 @@ async def delete_preset(preset_id: int):
     return {"deleted": True}
 
 
-@router.patch("/api/presets/{preset_id}/toggle")
-async def toggle_preset(preset_id: int):
+@router.patch("/api/presets/{preset_id}/scan_enabled")
+async def toggle_scan_enabled(preset_id: int):
     async with _db.pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
                 """
-                UPDATE search_presets SET is_active = NOT is_active, updated_at = NOW()
-                WHERE id = %s RETURNING id, is_active
+                UPDATE search_presets SET scan_enabled = NOT scan_enabled, updated_at = NOW()
+                WHERE id = %s RETURNING id, scan_enabled
+                """,
+                (preset_id,),
+            )
+            row = await cur.fetchone()
+            if not row:
+                raise HTTPException(404, "Preset not found")
+        await conn.commit()
+    return dict(row)
+
+
+@router.patch("/api/presets/{preset_id}/visibility")
+async def toggle_visibility(preset_id: int):
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                UPDATE search_presets SET is_visible = NOT is_visible, updated_at = NOW()
+                WHERE id = %s RETURNING id, is_visible
                 """,
                 (preset_id,),
             )
@@ -679,15 +717,16 @@ async def clone_preset(preset_id: int):
             await cur.execute(
                 """INSERT INTO search_presets
                    (name, category, city_code, area_code, neighborhood, property_types,
-                    min_price, max_price, min_rooms, max_rooms, extra_params, is_active)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    min_price, max_price, min_rooms, max_rooms, extra_params,
+                    scan_enabled, is_visible)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                    RETURNING *""",
                 (f"{original['name']} (copy)", original['category'], original['city_code'],
                  original['area_code'], original['neighborhood'], original['property_types'],
                  original['min_price'], original['max_price'], original['min_rooms'],
                  original['max_rooms'],
                  extra_params_json,
-                 True)
+                 True, True)
             )
             row = await cur.fetchone()
         await conn.commit()
@@ -713,8 +752,8 @@ async def get_amit_fit_properties(
 
     async with _db.pool.connection() as conn:
         async with conn.cursor() as cur:
-            # Get all active preset IDs (category filtering is done on p.category, not preset category)
-            await cur.execute("SELECT id FROM search_presets WHERE is_active = TRUE")
+            # Get all scan-enabled preset IDs (category filtering is done on p.category, not preset category)
+            await cur.execute("SELECT id FROM search_presets WHERE scan_enabled = TRUE")
             preset_ids = [r["id"] for r in await cur.fetchall()]
 
             if not preset_ids:
@@ -887,6 +926,17 @@ async def _run_fb_ingest_background(preset_id: int, listings: list[ScrapedListin
 @router.post("/api/scan/{preset_id}")
 async def trigger_scan(preset_id: int, background_tasks: BackgroundTasks):
     from pdis.scanner import get_scan_status
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT scan_enabled FROM search_presets WHERE id = %s",
+                (preset_id,),
+            )
+            row = await cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Preset {preset_id} not found")
+    if not row["scan_enabled"]:
+        raise HTTPException(status_code=400, detail=f"Preset {preset_id} has scanning disabled")
     status = await get_scan_status()
     if status["running"]:
         raise HTTPException(status_code=409, detail="Scan already in progress")
@@ -2456,14 +2506,14 @@ async def yad2_ingest(request: Request, body: Yad2IngestBody, background_tasks: 
     async with _db.pool.connection() as conn:
         async with conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
-                "SELECT id, category, is_active FROM search_presets WHERE id = %s",
+                "SELECT id, category, scan_enabled FROM search_presets WHERE id = %s",
                 (body.preset_id,),
             )
             preset = await cur.fetchone()
     if not preset:
         raise HTTPException(status_code=404, detail=f"Preset {body.preset_id} not found")
-    if not preset["is_active"]:
-        raise HTTPException(status_code=400, detail=f"Preset {body.preset_id} is not active")
+    if not preset["scan_enabled"]:
+        raise HTTPException(status_code=400, detail=f"Preset {body.preset_id} has scanning disabled")
 
     listings: list[ScrapedListing] = []
     for item in body.listings:

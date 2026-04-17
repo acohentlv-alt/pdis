@@ -149,7 +149,7 @@ Named for historical reasons but used as the universal external ID for ALL sourc
 
 ```
 run_scan(preset_id):
-  1. Load preset (must be is_active = TRUE)
+  1. Load preset (must be scan_enabled = TRUE)
   2. Create scan_session (status = running)
   3. Scrape (route to Yad2 or Madlan based on extra_params.source; FB ingest arrives via VM scraper)
   4. Upsert properties (ON CONFLICT updates all fields)

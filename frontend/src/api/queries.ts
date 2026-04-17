@@ -71,9 +71,9 @@ export function useClosedComps(yad2Id: string | undefined) {
 
 export function useAllPresets(includeHidden: boolean = false) {
   return useQuery({
-    queryKey: ['presets', includeHidden ? 'all' : 'active'],
+    queryKey: ['presets', includeHidden ? 'all' : 'visible'],
     queryFn: () => apiFetch<{ presets: Record<string, unknown>[] }>(
-      includeHidden ? '/api/presets' : '/api/presets?is_active=true'
+      includeHidden ? '/api/presets' : '/api/presets?visible=true'
     ),
   });
 }

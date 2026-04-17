@@ -20,7 +20,9 @@ interface PresetRowProps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   clonePreset: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  togglePreset: any;
+  toggleScanEnabled: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  toggleVisibility: any;
   confirmDeleteId: number | null;
   setConfirmDeleteId: (id: number | null) => void;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -41,7 +43,8 @@ export default function PresetRow({
   scanPreset,
   startEdit,
   clonePreset,
-  togglePreset,
+  toggleScanEnabled,
+  toggleVisibility,
   confirmDeleteId,
   setConfirmDeleteId,
   deletePreset,
@@ -87,7 +90,8 @@ export default function PresetRow({
   // When editing this row, show nothing — the form is rendered in the sheet body by PresetManager
   if (isEditing) return null;
 
-  const isActive = preset.is_active as boolean;
+  const scanEnabled = (preset.scan_enabled as boolean) ?? true;
+  const isVisible   = (preset.is_visible as boolean)   ?? true;
   const isScanningThis = activeScanPresetId === id;
   const isAnyScanRunning = scanStatus?.running ?? false;
   const progress = isScanningThis ? (scanStatus?.progress ?? null) : null;
@@ -125,16 +129,16 @@ export default function PresetRow({
   const detailLine = [hoodLabel, propTypesLabel].filter(Boolean).join(' · ');
 
   return (
-    <div className={`rounded-2xl border p-4 transition-colors ${isActive ? 'bg-white border-gray-200 shadow-sm' : 'bg-gray-50 border-gray-200 opacity-60'}`}>
+    <div className={`rounded-2xl border p-4 transition-colors ${scanEnabled ? 'bg-white border-gray-200 shadow-sm' : 'bg-gray-50 border-gray-200 opacity-60'}`}>
       <div className="flex items-center gap-3">
         {/* Toggle switch — enlarged hit area 44×44 */}
         <button
-          onClick={() => togglePreset.mutate(id)}
-          className={`shrink-0 w-12 h-7 rounded-full transition-colors min-w-[44px] min-h-[44px] flex items-center justify-start px-1 ${isActive ? 'bg-green-500' : 'bg-gray-300'}`}
-          title={isActive ? 'Active — click to deactivate' : 'Inactive — click to activate'}
+          onClick={() => toggleScanEnabled.mutate(id)}
+          className={`shrink-0 w-12 h-7 rounded-full transition-colors min-w-[44px] min-h-[44px] flex items-center justify-start px-1 ${scanEnabled ? 'bg-green-500' : 'bg-gray-300'}`}
+          title={scanEnabled ? 'Scanning enabled — click to disable' : 'Scanning disabled — click to enable'}
           style={{ padding: '0 2px' }}
         >
-          <span className={`block w-5 h-5 bg-white rounded-full shadow transition-transform ${isActive ? 'translate-x-5' : 'translate-x-0'}`} />
+          <span className={`block w-5 h-5 bg-white rounded-full shadow transition-transform ${scanEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
         </button>
 
         {/* Name + meta */}
@@ -145,7 +149,7 @@ export default function PresetRow({
         </div>
 
         {/* Run Now CTA */}
-        {isActive && (
+        {scanEnabled && (
           <button
             onClick={() => {
               setScanError(null);
@@ -191,6 +195,12 @@ export default function PresetRow({
                 className="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
               >
                 Clone
+              </button>
+              <button
+                onClick={() => { setOpenKebabId(null); toggleVisibility.mutate(id); }}
+                className="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                {isVisible ? 'Hide from app' : 'Show in app'}
               </button>
               <button
                 onClick={() => { setOpenKebabId(null); setConfirmDeleteId(id); }}

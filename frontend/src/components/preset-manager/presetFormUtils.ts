@@ -9,7 +9,8 @@ export interface PresetFormData {
   max_price: string;
   min_rooms: string;
   max_rooms: string;
-  is_active: boolean;
+  scan_enabled: boolean;
+  is_visible: boolean;
   category: string;
   // Advanced filters
   area_code: string;
@@ -88,7 +89,8 @@ export function emptyForm(): PresetFormData {
     max_price: '',
     min_rooms: '',
     max_rooms: '',
-    is_active: true,
+    scan_enabled: true,
+    is_visible: true,
     category: 'rent',
     area_code: '',
     neighborhood: '',
@@ -134,7 +136,8 @@ export function formToPayload(form: PresetFormData): Record<string, unknown> {
     max_price: form.max_price !== '' ? Number(form.max_price) : null,
     min_rooms: form.min_rooms !== '' ? Number(form.min_rooms) : null,
     max_rooms: form.max_rooms !== '' ? Number(form.max_rooms) : null,
-    is_active: form.is_active,
+    scan_enabled: form.scan_enabled,
+    is_visible: form.is_visible,
     category: form.category,
     // Advanced filters
     area_code: form.area_code.trim() || null,
@@ -178,7 +181,8 @@ export function presetToForm(preset: Record<string, unknown>): PresetFormData {
     max_price: preset.max_price != null ? String(preset.max_price) : '',
     min_rooms: preset.min_rooms != null ? String(preset.min_rooms) : '',
     max_rooms: preset.max_rooms != null ? String(preset.max_rooms) : '',
-    is_active: (preset.is_active as boolean) ?? true,
+    scan_enabled: (preset.scan_enabled as boolean) ?? true,
+    is_visible:   (preset.is_visible as boolean)   ?? true,
     category: (preset.category as string) ?? 'rent',
     // Advanced filters — from DB columns
     area_code: (preset.area_code as string) ?? '',

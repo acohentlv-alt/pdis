@@ -520,7 +520,7 @@ def main():
     yad2_presets = [
         p for p in presets
         if p.get("category") in ("forsale", "rent")
-        and p.get("is_active") is True
+        and p.get("scan_enabled") is True
         and (p.get("extra_params") or {}).get("source", "yad2") in (None, "yad2")
     ]
     log.info(f"Active Yad2 presets (rent+forsale): {len(yad2_presets)}")

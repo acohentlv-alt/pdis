@@ -207,7 +207,7 @@ export default function OpportunityPage() {
   const { data: presetsData } = useAllPresets();
   const allPresetsRaw = (presetsData?.presets ?? []) as Record<string, unknown>[];
   const allPresets = useMemo(
-    () => allPresetsRaw.filter(p => (p.is_active as boolean) ?? true),
+    () => allPresetsRaw.filter(p => (p.is_visible as boolean) ?? true),
     [allPresetsRaw]
   );
 

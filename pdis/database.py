@@ -546,6 +546,33 @@ async def run_migrations() -> None:
             await cur.execute("ALTER TABLE property_classifications DROP COLUMN IF EXISTS distress_score")
             await cur.execute("ALTER TABLE scan_preset_stats DROP COLUMN IF EXISTS opportunities")
 
+            # scan_enabled / is_visible — must be added BEFORE the A2 seed that filters on scan_enabled
+            await cur.execute(
+                "ALTER TABLE search_presets ADD COLUMN IF NOT EXISTS scan_enabled BOOLEAN NOT NULL DEFAULT TRUE"
+            )
+            await cur.execute(
+                "ALTER TABLE search_presets ADD COLUMN IF NOT EXISTS is_visible BOOLEAN NOT NULL DEFAULT TRUE"
+            )
+            # Seed initial values for known preset IDs (idempotent — DEFAULT TRUE so re-running is safe)
+            await cur.execute(
+                "UPDATE search_presets SET scan_enabled = FALSE, is_visible = FALSE WHERE id = 9"
+            )
+            await cur.execute(
+                "UPDATE search_presets SET scan_enabled = TRUE, is_visible = FALSE WHERE id = 12"
+            )
+            await cur.execute(
+                "UPDATE search_presets SET scan_enabled = TRUE, is_visible = FALSE WHERE id = 13"
+            )
+            await cur.execute(
+                "UPDATE search_presets SET scan_enabled = TRUE, is_visible = FALSE WHERE id = 44"
+            )
+            await cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_search_presets_scan_enabled ON search_presets(scan_enabled)"
+            )
+            await cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_search_presets_is_visible ON search_presets(is_visible)"
+            )
+
             # A2: Seed fb_groups array per preset — one-shot, idempotent.
             # GUARDED: only populates presets where fb_groups is NULL or empty.
             # Never overwrites Alan's manual curation via the admin UI.
@@ -561,7 +588,7 @@ async def run_migrations() -> None:
                                               '[]'::jsonb
                                           )
                                       )
-                 WHERE sp.is_active = TRUE
+                 WHERE sp.scan_enabled = TRUE
                    AND COALESCE(sp.extra_params->>'source', 'yad2') IN ('yad2', 'facebook')
                    AND (sp.extra_params->'fb_groups' IS NULL
                         OR sp.extra_params->'fb_groups' = '[]'::jsonb)

@@ -12,7 +12,8 @@ import {
   useCreatePreset,
   useUpdatePreset,
   useDeletePreset,
-  useTogglePreset,
+  useToggleScanEnabled,
+  useToggleVisibility,
   useClonePreset,
   useScanPreset,
   useUpsertThresholds,
@@ -49,7 +50,8 @@ export default function PresetManager({ open, onClose, category }: PresetManager
   const createPreset = useCreatePreset();
   const updatePreset = useUpdatePreset();
   const deletePreset = useDeletePreset();
-  const togglePreset = useTogglePreset();
+  const toggleScanEnabled = useToggleScanEnabled();
+  const toggleVisibility = useToggleVisibility();
   const clonePreset = useClonePreset();
   const scanPreset = useScanPreset();
   const { data: scanStatus } = useScanStatus();
@@ -179,8 +181,8 @@ export default function PresetManager({ open, onClose, category }: PresetManager
   // ── DERIVED + HANDLERS ────────────────────────────────────────────────────
 
   const allPresets = (data?.presets ?? []) as Record<string, unknown>[];
-  const activePresets = allPresets.filter(p => (p.is_active as boolean) ?? true);
-  const hiddenPresets = allPresets.filter(p => !(p.is_active as boolean));
+  const activePresets = allPresets.filter(p => (p.is_visible as boolean) ?? true);
+  const hiddenPresets = allPresets.filter(p => !(p.is_visible as boolean));
   const presets = showHidden ? allPresets : activePresets;
   const isFormOpen = showCreate || editingId !== null;
   const saving = createPreset.isPending || updatePreset.isPending || upsertThresholds.isPending || upsertFeatureAdjustments.isPending;
@@ -507,7 +509,8 @@ export default function PresetManager({ open, onClose, category }: PresetManager
                 scanPreset={scanPreset}
                 startEdit={startEdit}
                 clonePreset={clonePreset}
-                togglePreset={togglePreset}
+                toggleScanEnabled={toggleScanEnabled}
+                toggleVisibility={toggleVisibility}
                 confirmDeleteId={confirmDeleteId}
                 setConfirmDeleteId={setConfirmDeleteId}
                 deletePreset={deletePreset}

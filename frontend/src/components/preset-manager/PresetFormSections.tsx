@@ -111,6 +111,28 @@ export function SectionBasics({ form, setField, category }: BasicsProps) {
           />
         </div>
       )}
+
+      {/* Scan + visibility toggles */}
+      <div className="space-y-3">
+        <label className="flex items-center gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={form.scan_enabled}
+            onChange={e => setField('scan_enabled', e.target.checked)}
+            className="w-5 h-5 rounded border-gray-300 accent-gray-900"
+          />
+          <span className="text-sm text-gray-700">Scanning (runs on scheduled scans)</span>
+        </label>
+        <label className="flex items-center gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={form.is_visible}
+            onChange={e => setField('is_visible', e.target.checked)}
+            className="w-5 h-5 rounded border-gray-300 accent-gray-900"
+          />
+          <span className="text-sm text-gray-700">Visible in the main app</span>
+        </label>
+      </div>
     </div>
   );
 }

@@ -145,14 +145,25 @@ export function useDeletePreset() {
   });
 }
 
-export function useTogglePreset() {
+export function useToggleScanEnabled() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) =>
-      apiFetch(`/api/presets/${id}/toggle`, { method: 'PATCH' }),
+      apiFetch(`/api/presets/${id}/scan_enabled`, { method: 'PATCH' }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['presets'] });
       qc.invalidateQueries({ queryKey: ['amitFitProperties'] });
+    },
+  });
+}
+
+export function useToggleVisibility() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) =>
+      apiFetch(`/api/presets/${id}/visibility`, { method: 'PATCH' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['presets'] });
     },
   });
 }

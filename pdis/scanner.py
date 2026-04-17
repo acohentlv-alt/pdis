@@ -578,8 +578,8 @@ async def run_scan(preset_id: int) -> dict:
     if not preset:
         raise ValueError(f"Preset {preset_id} not found")
 
-    if not preset.get("is_active"):
-        raise ValueError(f"Preset {preset_id} is not active")
+    if not preset.get("scan_enabled"):
+        raise ValueError(f"Preset {preset_id} is not scan-enabled")
 
     session_id = await _create_session(preset_id)
     log = log.bind(session_id=session_id)
@@ -905,7 +905,7 @@ async def run_all_scans() -> list[dict]:
     async with _db.pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT id FROM search_presets WHERE is_active = TRUE ORDER BY id"
+                "SELECT id FROM search_presets WHERE scan_enabled = TRUE ORDER BY id"
             )
             rows = await cur.fetchall()
 
