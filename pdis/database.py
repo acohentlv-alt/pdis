@@ -28,6 +28,10 @@ async def init_pool() -> None:
         # alongside the Madlan scheduled scan. With max_size=15 we have headroom on
         # Neon (free tier supports 100 concurrent connections).
         timeout=15.0,
+        # Neon pauses idle connections after ~5 min; without liveness checks the pool
+        # hands out dead sockets and the caller sees `SSL connection closed unexpectedly`.
+        check=AsyncConnectionPool.check_connection,
+        max_idle=240.0,
     )
     await pool.open(wait=False)
     logger.info("db.pool_opened")
