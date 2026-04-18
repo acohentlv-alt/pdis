@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     ingest_secret: str = ""
     fb_ingestion_enabled: bool = False
     fb_scans_per_day: int = 2
+    vm_trigger_url: str = ""        # e.g. http://129.159.158.214:8787/trigger
+    vm_trigger_secret: str = ""     # shared with trigger_server.py on VM
     yad2_vm_ingestion_enabled: bool = False
     govmap_ingestion_enabled: bool = False
     # Yad2 phone fetch (per-listing customer endpoint on gw.yad2.co.il)

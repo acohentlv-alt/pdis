@@ -15,7 +15,7 @@ Alan is not a coder. Every explanation must be in **plain English**. Explain the
 
 PDIS (Property Distress Intelligence System) is a rental property monitoring tool for the Israeli market. It scans Yad2, Madlan, and Facebook Groups for rental listings in Tel Aviv, tracks them over time, and detects distress signals (price drops, relistings, long time on market, urgent language, etc.). Built for Alan's friend Shechter.
 
-**How it works:** Automated scans run on a daily schedule — Yad2 from Oracle VM at 08:00 IDT (systemd timer); Madlan via cron-job.org → Render at 10:00 IDT (verify second daily slot, if any, in the cron-job.org dashboard); Facebook from Oracle VM at 10:00 IDT (systemd timer). Shechter opens the mobile-first web app and sees fresh opportunities — properties where the landlord might be desperate (price dropped, relisted multiple times, been listed too long).
+**How it works:** Automated scans run on a daily schedule — Yad2 (both rent + forsale) from Oracle VM at 10:00 IDT (systemd timer, consolidated 2026-04-18); Madlan via cron-job.org → Render at 10:00 IDT (verify second daily slot, if any, in the cron-job.org dashboard); Facebook from Oracle VM at 10:00 IDT (systemd timer). Shechter opens the mobile-first web app and sees fresh opportunities — properties where the landlord might be desperate (price dropped, relisted multiple times, been listed too long).
 
 ---
 
@@ -50,7 +50,7 @@ Token reuses `gh auth token` (scopes: `repo, gist, read:org, workflow`). If it s
 
 | Module | Purpose |
 |--------|---------|
-| `pdis/scraper.py` | Yad2 scraper — REST API via curl_cffi with Chrome TLS impersonation |
+| `pdis/scraper.py` | Yad2 scraper — REST API via curl_cffi with Chrome TLS impersonation (fallback only; production routes Yad2 through Oracle VM) |
 | `pdis/scraper_madlan.py` | Madlan scraper — GraphQL API via curl_cffi, PerimeterX cookie handling |
 | `pdis/scanner.py` | Scan orchestrator — `run_scan()` and `run_all_scans()` pipeline |
 | `pdis/signals.py` | Distress signal calculator — strong/weak signal detection |
@@ -270,9 +270,9 @@ FastAPI matches routes top-to-bottom. Path parameter routes (`{preset_id}`, `{ya
 
 | Source | Runs on | Reason |
 |--------|---------|--------|
-| Yad2 rent | Oracle VM (`vm-scraper/run_yad2.py`) | `/realestate/rent` got blocked from Render IP ~2026-04-15; moved to VM with forsale, daily 08:04 IDT systemd timer |
+| Yad2 rent | Oracle VM (`vm-scraper/run_yad2.py`) | consolidated with forsale on VM 2026-04-18 after /rent began blocking on Render IPs; single daily 10:00 IDT run |
 | Madlan | Render | PerimeterX cookie enough; no browser needed |
-| Yad2 forsale | Oracle VM (`vm-scraper/run_yad2.py`) | `/forsale` IP-blocked by ShieldSquare on Render; same script handles both rent + forsale since 2026-04-15 |
+| Yad2 forsale | Oracle VM (`vm-scraper/run_yad2.py`) | `/forsale` IP-blocked by ShieldSquare on Render; consolidated with rent, single daily 10:00 IDT run |
 | Facebook Groups | Apify (cloud) + Oracle VM orchestrator | Apify scrapes via residential proxies; VM systemd timer triggers daily at 10:00 IDT |
 | Govmap backfill | Oracle VM (`vm-scraper/run_govmap.py`) | Long-running backfill, tmux/persistent disk |
 
@@ -301,7 +301,9 @@ Backfill script: `vm-scraper/run_govmap.py` on the Oracle VM. POSTs in batches t
 | `INGEST_SECRET` | Bearer for VM scrapers → `/api/ingest/*` |
 | `FB_INGESTION_ENABLED` | bool, gate for `/api/ingest/facebook` |
 | `FB_SCANS_PER_DAY` | int, FB VM scan cadence (1 during probation, 2 normal) |
-| `YAD2_VM_INGESTION_ENABLED` | bool, gate for `/api/ingest/yad2` (forsale) |
+| `VM_TRIGGER_URL` | URL of the trigger daemon on Oracle VM (e.g. `http://129.159.158.214:8787/trigger`) |
+| `VM_TRIGGER_SECRET` | Bearer secret shared between Render and `trigger_server.py` on VM |
+| `YAD2_VM_INGESTION_ENABLED` | bool, gate for `/api/ingest/yad2` (rent + forsale) |
 | `GOVMAP_INGESTION_ENABLED` | bool, gate for `/api/ingest/govmap-deals` |
 | `APIFY_TOKEN` | Apify API token for FB Groups scraper (set on VM, not Render) |
 | `ANTHROPIC_API_KEY` | Haiku 4.5 for FB post field extraction (set on VM, not Render) |

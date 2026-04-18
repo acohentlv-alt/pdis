@@ -52,16 +52,9 @@ cd /opt/pdis-fb-scraper
 
 Watch the output — verify presets are fetched, listings scraped, and backend returns HTTP 200.
 
-### Cron entry
+### Schedule
 
-Add to VM crontab (`crontab -e`):
-
-```
-CRON_TZ=Asia/Jerusalem
-30 8,18 * * * flock -n /var/lock/pdis-yad2-scraper.lock /opt/pdis-fb-scraper/run_yad2.sh >> /var/log/pdis-yad2-scraper.log 2>&1
-```
-
-Note: runs 30 minutes after the rent scan (which runs at :00) to avoid DB contention.
+The Yad2 scraper runs via systemd timer (`pdis-yad2-scraper.timer`) at 10:00 IDT every day. Both rent and forsale presets are handled by the same `run_yad2.py` script in a single daily run — consolidated from the previous 08:00 IDT forsale-only run as of 2026-04-18 (Render IPs began getting blocked on `/realestate/rent` too). No crontab entry is used or needed.
 
 ### Enable in production
 

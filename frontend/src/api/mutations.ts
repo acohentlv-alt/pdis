@@ -192,6 +192,17 @@ export function useScanPreset() {
   });
 }
 
+export function useTriggerYad2Manual() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch('/api/scan/yad2/manual', { method: 'POST' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['scanStatus'] });
+      qc.invalidateQueries({ queryKey: ['presetStats'] });
+    },
+  });
+}
+
 export function useSaveOperatorInput(yad2Id: string) {
   const qc = useQueryClient();
   return useMutation({

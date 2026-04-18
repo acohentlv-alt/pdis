@@ -7,11 +7,9 @@ import json
 
 import structlog
 
-import asyncio
-
 import pdis.database as _db
 from pdis.models import ScrapedListing, ScrapeResult
-from pdis.scraper import scrape_preset, fetch_item_detail
+from pdis.scraper import scrape_preset
 from pdis.scraper_madlan import scrape_madlan_preset
 from pdis.config import settings
 
@@ -358,59 +356,6 @@ async def _record_preset_stats(preset_id: int, session_id: int) -> None:
         await conn.commit()
 
 
-async def _backfill_built_sqm(listings: list[ScrapedListing], log) -> None:
-    """Fetch square_meter_build and description from Yad2 detail API for properties missing them."""
-    # Find yad2_ids that are missing square_meter_build OR have a short/missing description
-    yad2_ids = [l.yad2_id for l in listings if l.source == "yad2"]
-    if not yad2_ids:
-        return
-
-    async with _db.pool.connection() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute(
-                """SELECT yad2_id FROM properties
-                   WHERE yad2_id = ANY(%s)
-                   AND (
-                       square_meter_build IS NULL
-                       OR description IS NULL
-                       OR LENGTH(description) < 30
-                   )""",
-                (yad2_ids,),
-            )
-            missing = [r["yad2_id"] for r in await cur.fetchall()]
-
-    if not missing:
-        return
-
-    log.info("scanner.fetching_detail", count=len(missing))
-    updated = 0
-    for yad2_id in missing:
-        detail = await asyncio.to_thread(fetch_item_detail, yad2_id)
-        if detail:
-            updates = {}
-            if detail.get("square_meter_build") is not None:
-                try:
-                    updates["square_meter_build"] = int(detail["square_meter_build"])
-                except (ValueError, TypeError):
-                    pass
-            if detail.get("info_text"):
-                updates["description"] = detail["info_text"]
-
-            if updates:
-                set_clause = ", ".join(f"{k} = %s" for k in updates)
-                values = list(updates.values()) + [yad2_id]
-                async with _db.pool.connection() as conn:
-                    async with conn.cursor() as cur:
-                        await cur.execute(
-                            f"UPDATE properties SET {set_clause} WHERE yad2_id = %s",
-                            values,
-                        )
-                    await conn.commit()
-                updated += 1
-        await asyncio.sleep(0.3)  # rate limit
-
-    log.info("scanner.detail_filled", updated=updated, total=len(missing))
-
 
 async def _cache_madlan_years(listings: list[ScrapedListing]) -> None:
     """Cache year_built values from Madlan listings into building_metadata.
@@ -600,16 +545,15 @@ async def run_scan(preset_id: int) -> dict:
         _extra = _json.loads(_extra)
     _source = _extra.get("source", "yad2")
 
-    # VM-skip: forsale yad2 scraping is routed through Oracle VM when flag is set
-    if (
-        preset["category"] == "forsale"
-        and _source == "yad2"
-        and getattr(settings, "yad2_vm_ingestion_enabled", False)
-    ):
-        log.info("scanner.yad2_forsale_skipped_vm", preset_id=preset_id, preset_name=preset["name"])
+    # VM-skip: ALL Yad2 scraping routed through Oracle VM when flag is set
+    # (Render-IP blocked on /forsale by ShieldSquare; /rent started blocking 2026-04-18.
+    # Consolidated to single 10:00 IDT VM run.)
+    if _source == "yad2" and getattr(settings, "yad2_vm_ingestion_enabled", False):
+        log.info("scanner.yad2_skipped_vm", preset_id=preset_id,
+                 preset_name=preset["name"], category=preset["category"])
         await _finish_session(session_id, result, new_count,
                               status="skipped_vm",
-                              error_message="Yad2 forsale scraping routed through Oracle VM")
+                              error_message="Yad2 scraping routed through Oracle VM")
         return {
             "session_id": session_id, "preset_id": preset_id,
             "preset_name": preset["name"], "status": "skipped_vm",
@@ -669,10 +613,6 @@ async def run_scan(preset_id: int) -> dict:
         # Cache Madlan year_built values into building_metadata
         if _source == "madlan":
             await _cache_madlan_years(result.listings)
-
-        # Fetch square_meter_build from detail API for properties that don't have it
-        if _source == "yad2":
-            await _backfill_built_sqm(result.listings, log)
 
         from pdis.events import detect_events
         from pdis.classification import persist_signals_batch
@@ -834,10 +774,6 @@ async def run_scan_from_listings(preset_id: int, listings: list[ScrapedListing],
 
         log.info("scanner.ingest_upserted", total=total, new=new_count)
 
-        # Fetch square_meter_build from detail API for properties that don't have it
-        if source == "yad2":
-            await _backfill_built_sqm(listings, log)
-
         from pdis.events import detect_events
         from pdis.classification import persist_signals_batch
         from pdis.matching import find_matches, find_fb_cross_source_matches, detect_customer_relistings, backfill_year_built_from_matches, backfill_year_built_from_buildings
@@ -864,6 +800,10 @@ async def run_scan_from_listings(preset_id: int, listings: list[ScrapedListing],
         if property_ids:
             await persist_signals_batch(property_ids)
             log.info("scanner.signals_persisted", count=len(property_ids))
+
+        # Yad2 phone capture for VM-ingested listings
+        if source == "yad2":
+            await _yad2_phone_scan_hook(session_id)
 
         relist_count = await detect_customer_relistings(session_id)
         if relist_count > 0:

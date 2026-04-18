@@ -1,0 +1,18 @@
+[Unit]
+Description=PDIS Yad2 manual-trigger webhook
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ubuntu
+Type=simple
+WorkingDirectory=/opt/pdis-yad2-scraper
+ExecStart=/usr/bin/python3 /opt/pdis-yad2-scraper/trigger_server.py
+EnvironmentFile=/opt/pdis-yad2-scraper/.env
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/var/log/pdis-yad2-trigger.log
+StandardError=append:/var/log/pdis-yad2-trigger.log
+
+[Install]
+WantedBy=multi-user.target
