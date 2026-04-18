@@ -1,57 +1,53 @@
-# HANDOFF — April 17, 2026
+# HANDOFF — April 17-18, 2026 (day→evening session: pool fix + telemetry as UX bug detector)
 
 ## What we did today
 
-Shipped one big refactor: **split `search_presets.is_active` into two independent booleans — `scan_enabled` + `is_visible`**. One commit on main (`c2682b9`), pushed, Render rebuilding.
+Two things shipped to main:
 
-**Root cause we fixed:** yesterday Alan hid preset 44 (Madlan) via the new "Show hidden" toggle thinking it would just hide the pill — but the single `is_active` flag controlled BOTH "show in UI" AND "scan this preset." Result: Madlan (and three other hidden Yad2 presets) silently stopped scanning. Data went stale, no price drops, no removals detected.
+- **`c0d0433` — Neon stale-connection pool fix.** Found 17 `SSL connection closed unexpectedly` errors in the `/api/debug/recent-errors` buffer, all idle-connection issues from Neon killing sockets after ~5 min. Added `check=AsyncConnectionPool.check_connection` + `max_idle=240` to the pool config in `pdis/database.py`. 4-line change. VM-side retry from yesterday (`5209985`) had been masking the bug — scans still completed because retries caught the 500s.
 
-Now the two concerns are independent. Preset row's green dot toggles scanning; kebab menu → "Hide from app"/"Show in app" toggles visibility. Backfill applied as: 9 → both OFF (throttling, stays off), 12/13/44 → scanning ON, hidden from UI.
-
-Ran the full `/plan → /review → /exec → /qa` cycle. Reviewer caught 5 wrong-table citations (`properties.is_active` vs `search_presets.is_active`), backfill DEFAULT-TRUE bug that would have left preset 9 silently scanning, and missing `/toggle` endpoint consumer list. All fixed in revision. QA 15/15 locally.
-
-Morning check confirmed yesterday's ship (fire-and-forget, Amit Fit split, Show hidden toggle, Yad2 token cleanup) all worked — 4/4 active Yad2 presets done clean at 08:09–08:32 IDT.
+- **`04b5685` — Telemetry v1, as a UX bug detector.** Full `/plan → /review → /exec → /qa` cycle (Alan challenged the original framing mid-plan — see below). New `ui_events` table, `POST /api/ui-events` + `GET /api/ui-events/recent-issues` endpoints. New `/admin/ux-health` page (red/yellow/green sections, 30s auto-refresh, session-grouped errors, NavBar hidden). New `lib/telemetry.ts` helper. React error boundary + window error listeners. `apiFetch` instrumented (not monkey-patched) for `api_error` + `slow_response`. `page_view` with StrictMode-safe `useRef` guard. `empty_state` events on dashboard + favorites. Deleted `/api/log-reveal` hack + `LogRevealBody` + frontend fetch (grep returns zero). QA 9/10 passed.
 
 ## What's half-done / needs attention
 
-- **Oracle VM still on old `run_yad2.py`.** Today's commit changed `p.get("is_active")` → `p.get("scan_enabled")`. Until VM pulls, VM keeps reading `is_active` (which is still TRUE for scan-enabled presets because backfill matched them, so functionally fine — but cleaner to pull). SSH command in TASKS.md.
-- **Apify FB pipeline still running — burning $5/day.** Alan flagged it this morning and asked to shut down. We never got to it (pivoted into the `is_active` split instead). Still hot. Shutdown procedure in TASKS.md.
-- **Alan mentioned "new ideas" he wanted to discuss after the FB shutdown.** Never got to those. Pick this up next session.
-- **Amit Fit `category` param silently ignored.** QA noticed `/api/amit-fit/properties?category=rent` and `?category=forsale` both return 81 rows. Pre-existing bug from `0f97418`. Backlog.
-- **`/api/debug/recent-errors`** still temporary. Today's monitoring didn't need it — remove or gate soon.
+- **Both of today's commits are AWAITING iPhone QA on Render.** The telemetry admin page has only been tested on localhost — the real test is hitting `https://pdis-lsah.onrender.com/admin/ux-health` on your phone after Render deploys (`04b5685` pushed at end-of-session, deploy ~3-5 min).
+- **FB pipeline shutdown STILL NOT DONE.** This was urgent from yesterday's handoff (`$5/day bleed`) and we never got to it — the conversation pivoted into the Neon bug, then telemetry. Command list in TASKS.md under "READY TO RUN."
+- **Double `page_view` on `/favorites`** — known 0-severity defect. `/favorites` redirects to `/listings` via React Router `<Navigate>` and both pathnames fire the effect. Cosmetic only (admin counts slightly inflated).
+- **Test events in prod DB.** QA session left ~20 synthetic events with session_ids like `qa-session-*`. Cleanup SQL is in TASKS.md. Low priority — admin page filters by severity and test events are mostly `info`.
+- **`/api/debug/recent-errors` still exposed.** Its job is done now (it helped us find the Neon bug). Task to gate it behind a flag is in NOT STARTED.
 
 ## What to do next
 
-1. **SHUT DOWN FB pipeline** (see TASKS.md "READY TO RUN"). Two commands, ~2 min. This was Alan's explicit request this morning.
-2. **Git pull on Oracle VM** for `run_yad2.py` scan_enabled fix. One command.
-3. **iPhone tap-through the split UI on Render:**
-   - Dashboard pills — presets 9/12/13/44 absent.
-   - PresetManager → "Show hidden" toggle reveals them greyed out.
-   - Kebab menu → "Hide from app" / "Show in app" items visible.
-   - Green dot toggles scanning independent of visibility.
-4. **Verify tomorrow's 08:00 + 10:00 IDT scans.** Expect Yad2 sessions for presets 7/8/11/12/13/23 + Madlan for preset 44. Preset 9 should NOT appear.
-5. **Pick up "new ideas" conversation** Alan flagged this morning.
-6. **Strategic item #1 (telemetry)** still the Monday-morning priority.
+1. **iPhone tap-through telemetry on Render.** Hard-refresh, visit `/admin/ux-health` (no NavBar), tap around 30 seconds, watch counts update. Reveal a phone on a property, check it appears in admin within 30s.
+2. **SHUT DOWN FB PIPELINE** (carried over urgent). 2 commands, ~2 min. See TASKS.md.
+3. **iPhone tap-through the `is_active` split UI from yesterday's session.** (PresetManager green dot, kebab menu, Show hidden toggle.)
+4. **Git pull on Oracle VM** for `run_yad2.py scan_enabled` field change.
+5. **Monitor `/api/debug/recent-errors` over 24h.** If the pool fix worked, no new `SSL connection closed unexpectedly` errors should accumulate. After 24h clean, gate or remove the debug endpoint.
+6. **08:00 IDT scan health check** — expect 6 Yad2 + 1 Madlan sessions (presets 7/8/11/12/13/23 + 44). Preset 9 should NOT appear.
 
 ## Watch out for
 
-- **Deploy gap window, ~5 min.** Old frontend builds calling `/api/presets?is_active=true` will still work — the deprecated alias maps to `scan_enabled`. But between push (~14:05 IDT) and Render finishing (~14:10 IDT), users may see brief glitches if the browser cache mixes old FE + new BE.
-- **`search_presets.is_active` column kept for now.** Nothing writes to it. In 1 week, drop the column + remove the deprecated `?is_active` alias. Task is queued.
-- **Worktree branch was 28 commits behind main.** Caused a painful rebase/cherry-pick round with 5 conflicts including PresetManager.tsx being moved into a subdirectory between the branch's base and main. Lost ~30 min. Lesson for future: rebase worktree onto main before starting work, not after.
-- **Executor initially wrote edits to the OLD `frontend/src/components/PresetManager.tsx`** (which on current main is just a 1-line re-export stub). Had to spawn a second executor for the real `preset-manager/` subdir. This worked but was wasteful. Pattern to watch: when a worktree is stale, grep both the worktree tree AND current main before exec.
-- **The `YAD2_PHONE_FETCH_ENABLED` flag** still false on Render. Yad2 phones NOT yet being fetched. Not related to today's work but reminding.
+- **Alan correctly pushed back on the telemetry premise mid-plan.** The first brief I proposed was conversion-analytics ("which signals convert to phone reveals"). Alan challenged it — at n=2 users, direct conversation beats instrumentation. I conceded. We pivoted to **telemetry as UX bug detector** (errors, warnings, friction), which delivers value from day 1 at this scale. **Lesson:** question "strategic priority" items from multiple-hop handoffs against current reality. The "telemetry Monday-morning priority" framing had propagated across 4+ handoffs without anyone checking whether it was still the right frame.
+- **Reviewer caught 3 real design issues before exec.** (1) monkey-patching `window.fetch` → instrument `apiFetch` instead (cleaner, no recursive-log risk). (2) rage-tap detector too hand-wavy → cut entirely per Alan. (3) PropertyCard has `yad2_id` not `property_id` → backend must resolve. Alan's decision to ship AFTER revise without a second review was correct — remaining issues were mechanical.
+- **Two git worktree footguns dodged:** (a) Worktree `claude/youthful-sammet` started 16 commits behind main — fast-forwarded at session start before any edits. (b) During exec, 2 more commits landed on main from a parallel session (`c2682b9`, `ed31367`). My commit rebased cleanly, no conflicts. Pattern: **always `git fetch && git rebase origin/main` before pushing from a worktree.**
+- **Render rebuilds twice today** — once for the pool fix mid-morning, once for telemetry at end-of-session. Free-tier cold starts between deploys can make any automated calls fail. Tomorrow morning's 08:00 IDT should be past the deploy storm.
+- **`/admin/ux-health` has no auth.** Documented as acceptable at n=2 (URL is unlisted) but worth revisiting if the user count grows.
+- **Conversation with Alan about "pass to remote session from iPhone"** was parked. Short answer: target session must be cloud (remote), not local — local Mac sessions aren't reachable from iPhone. No single settings.json toggle exists; options are a shell alias or just starting sessions from iPhone directly.
 
 ## Test these
 
-- [ ] **Hard-refresh** `https://pdis-lsah.onrender.com` on iPhone after Render finishes. Dashboard pill row should NOT include presets 9, 12, 13, 44. Pill count drops by 4 vs yesterday.
-- [ ] **Open PresetManager → toggle "Show hidden"** — greyed rows for the 4 hidden presets appear.
-- [ ] **Tap a hidden preset's kebab** — menu item reads "Show in app". Tap it → refresh dashboard → pill reappears.
-- [ ] **Tap a visible preset's green dot** — dot greys out. Refresh PresetManager → still grey. Tap again → green.
-- [ ] **Create a new test preset** → both defaults checked, appears in dashboard immediately. Delete when done.
-- [ ] **Tomorrow 08:00 IDT** — `/api/scan/sessions?limit=20` shows 6 Yad2 sessions (7/8/11/12/13/23, NOT 9).
-- [ ] **Tomorrow 10:00 IDT** — Madlan session for preset 44 appears.
-- [ ] **Curl check:** `curl .../api/presets?is_active=true | jq '.presets | length'` returns same count as `?scan_enabled=true` (deprecated alias still works).
+- [ ] `https://pdis-lsah.onrender.com/admin/ux-health` renders on iPhone (no NavBar)
+- [ ] Red section empty (or only real errors)
+- [ ] Green strip shows non-zero `page_views_24h`, `phone_reveals_24h`, `sessions_24h`
+- [ ] Tap phone reveal on a property → event in admin within 30s, signals snapshotted in metadata
+- [ ] Over 24h, `curl .../api/debug/recent-errors | jq '.count'` stays flat (no new SSL-closed entries)
+- [ ] 08:00 IDT VM run: 6 Yad2 presets + 1 Madlan preset 44 = 7 `done` sessions
+- [ ] PresetManager kebab menu shows "Hide from app" / "Show in app" correctly
+- [ ] Dashboard pill count does not include presets 9, 12, 13, 44
 
 ---
 
-*Archived: HANDOFF_2026-04-16_evening2.md (the Apr 16 evening session's handoff + morning check from this session).*
+*Archived sessions:*
+- *HANDOFF_2026-04-17.md — yesterday's `is_active` split session.*
+- *HANDOFF_2026-04-16_evening2.md — Apr 16 evening.*
+- *HANDOFF_2026-04-15_night2.md — Apr 15 night.*
