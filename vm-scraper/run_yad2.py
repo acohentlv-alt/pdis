@@ -105,7 +105,7 @@ def _extract_row4_value(row4: list, key: str):
     return None
 
 
-def _parse_listing(item: dict) -> "dict | None":
+def _parse_listing(item: dict, category: str) -> "dict | None":
     """Parse a single feed item into a plain dict matching Yad2IngestListing schema."""
     if item.get("type") != "ad" or item.get("ad_type") not in ("ad", "platinum"):
         return None
@@ -206,7 +206,7 @@ def _parse_listing(item: dict) -> "dict | None":
 
     return {
         "yad2_id": str(yad2_id),
-        "category": "forsale",
+        "category": category,
         "address_street": item.get("street"),
         "address_home_number": address_home_number,
         "address_city": item.get("city"),
@@ -343,13 +343,14 @@ def fetch_item_detail(yad2_id: str) -> "dict | None":
     return None
 
 
-def scrape_preset_forsale(preset: dict) -> list:
-    """Scrape all pages for a forsale preset. Returns list of listing dicts."""
+def scrape_preset_yad2(preset: dict) -> list:
+    """Scrape all pages for a Yad2 preset (rent or forsale). Returns list of listing dicts."""
     listings = []
     preset_id = preset.get("id")
 
-    feed_url = f"{YAD2_FEED_BASE}/forsale"
-    referer = f"https://www.yad2.co.il/realestate/forsale"
+    slug = preset.get("category", "forsale")
+    feed_url = f"{YAD2_FEED_BASE}/{slug}"
+    referer = f"https://www.yad2.co.il/realestate/{slug}"
 
     log.info(f"[preset {preset_id}] Starting scrape")
 
@@ -399,7 +400,7 @@ def scrape_preset_forsale(preset: dict) -> list:
 
             page_listings = []
             for item in feed_items:
-                parsed = _parse_listing(item)
+                parsed = _parse_listing(item, slug)
                 if parsed:
                     page_listings.append(parsed)
 
@@ -532,7 +533,7 @@ def main():
     for i, preset in enumerate(yad2_presets):
         preset_id = preset["id"]
         try:
-            listings = scrape_preset_forsale(preset)
+            listings = scrape_preset_yad2(preset)
 
             if listings:
                 listings = fill_detail_for_missing(listings)

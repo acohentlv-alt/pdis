@@ -16,6 +16,7 @@ import {
   useToggleVisibility,
   useClonePreset,
   useScanPreset,
+  useTriggerYad2Manual,
   useUpsertThresholds,
   useUpsertFeatureAdjustments,
 } from '../../api/mutations';
@@ -54,11 +55,13 @@ export default function PresetManager({ open, onClose, category }: PresetManager
   const toggleVisibility = useToggleVisibility();
   const clonePreset = useClonePreset();
   const scanPreset = useScanPreset();
+  const triggerYad2 = useTriggerYad2Manual();
   const { data: scanStatus } = useScanStatus();
   const { data: fbGroupsData } = useFbGroups();
 
   const [activeScanPresetId, setActiveScanPresetId] = useState<number | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
+  const [yad2TriggerError, setYad2TriggerError] = useState<string | null>(null);
 
   const [showCreate, setShowCreate] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -410,13 +413,32 @@ export default function PresetManager({ open, onClose, category }: PresetManager
         {/* Sticky header */}
         <div className="sticky top-4 bg-white px-5 pt-2 pb-3 flex items-center justify-between z-10 border-b border-gray-100">
           <span className="text-xl font-bold text-gray-900 tracking-tight">Manage Presets</span>
-          <button
-            onClick={() => { cancelForm(); handleOuterClose(); }}
-            className="text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-full text-lg min-h-[44px] min-w-[44px] flex items-center justify-center transition-colors"
-            aria-label="Close"
-          >
-            &#x2715;
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setYad2TriggerError(null);
+                triggerYad2.mutate(undefined, {
+                  onError: (e: unknown) => setYad2TriggerError(e instanceof Error ? e.message : 'Failed to trigger Yad2 run'),
+                });
+              }}
+              disabled={triggerYad2.isPending || (scanStatus?.running ?? false)}
+              className="text-sm font-medium px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors min-h-[36px]"
+              title={yad2TriggerError ?? undefined}
+            >
+              {(triggerYad2.isPending || (scanStatus?.running ?? false))
+                ? `Running\u2026 ${scanStatus?.progress != null ? `${scanStatus.progress}%` : ''}`
+                : yad2TriggerError
+                  ? 'Run Yad2 now \u26a0\ufe0f'
+                  : 'Run Yad2 now'}
+            </button>
+            <button
+              onClick={() => { cancelForm(); handleOuterClose(); }}
+              className="text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-full text-lg min-h-[44px] min-w-[44px] flex items-center justify-center transition-colors"
+              aria-label="Close"
+            >
+              &#x2715;
+            </button>
+          </div>
         </div>
 
         {/* Form view — shown when create or editing */}

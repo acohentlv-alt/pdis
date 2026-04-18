@@ -883,6 +883,29 @@ async def scan_status():
     return await get_scan_status()
 
 
+@router.post("/api/scan/yad2/manual")
+async def trigger_yad2_manual(request: Request):
+    """Fire the VM Yad2 scraper on demand. UI polls /api/scan/status for progress."""
+    from pdis.config import settings
+    import httpx
+    if not settings.vm_trigger_url or not settings.vm_trigger_secret:
+        raise HTTPException(503, "VM trigger not configured")
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.post(
+                settings.vm_trigger_url,
+                headers={"Authorization": f"Bearer {settings.vm_trigger_secret}"},
+            )
+    except Exception as exc:
+        raise HTTPException(502, f"VM unreachable: {exc}")
+    if r.status_code == 409:
+        raise HTTPException(409, "VM Yad2 scraper already running")
+    if r.status_code == 429:
+        raise HTTPException(429, "VM rate-limited (10 min cooldown)")
+    if r.status_code != 202:
+        raise HTTPException(502, f"VM returned {r.status_code}: {r.text[:200]}")
+    return {"status": "started"}
+
 
 async def _run_scan_background(preset_id: int) -> None:
     """Background wrapper for per-preset scan — uses the same DB-backed lock as scheduled scans."""
