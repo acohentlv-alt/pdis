@@ -129,8 +129,29 @@ LOG_FILE hardcoded to `/var/log/pdis-yad2-manual.log`. Fine for VM, fails locall
 ### 🆕 Error toast for "Run Yad2 now" button
 Executor chose inline warning icon + native tooltip over a full toast (proportionate for a header button). If you want a proper toast pattern, small follow-up.
 
-### Alan's new product direction — distressed sellers (הוצאה לפועל / פשיטות רגל)
-Execution-office proceedings, bankruptcy filings. Scope expansion from listing-side distress to owner-side. Needs own `/plan`: data sources, scrapability, UI integration.
+### 🆕 Strategic vision — "Golden Sources" + "Profit Floor" (late-night Apr 18 discussion)
+
+Alan pasted a full product brief from his claude.ai "fortress" project chat. Two new modules proposed; broken into three feasibility tiers during end-of-session discussion. Full vision in HANDOFF.md under "Strategic vision dump." Short version:
+
+**Tier 1 — Profit Floor / מחיר רצפה (ships in days, pure PDIS extension):**
+Reverse-engineered pricing. For each listing, compute the max rent/purchase price Amit can pay and still hit his target margin, using existing neighborhood rental distributions. Surface as a single headline on the PropertyCard: **"אל תשלם יותר מ-X ש״ח בחודש"**. Implementation: new `max_negotiation_price` field in `signals.py → details`; React render on card. No new data sources. **This is the safest/fastest next step.** Needs its own `/plan`.
+
+**Tier 2 — The Vault / מקורות הזהב (ships in weeks, needs new scrapers):**
+Separate "Golden Sources" feed/pill surfacing properties from:
+- **Maya (maya.tase.co.il)** — TASE disclosure portal. Public, stable, easy ingest. But only ~500 listed companies; narrow TAM.
+- **Official Gazette (רשומות)** — receiver sale notices. Free, public, fragile to parse (Hebrew gov PDFs).
+- **insolvency.gov.il / כונס הנכסים הרשמי** — some case data public. Legacy site, fragile scraping.
+
+Surfaces as a separate pill with its own property feed — NOT cross-referenced to Yad2 listings (see Tier 3). Useful to Amit as a curated "properties being sold by receivers this week" feed. **Needs a feasibility spike FIRST** (90 min, one agent, hands-on testing of each source) before writing any scraper code.
+
+**Tier 3 — Ultra-Distress cross-referencing (BLOCKED on data access):**
+The exciting part: a Yad2 card lights up because its owner is in insolvency. Requires linking debtor name → property address. Bridge is TABU (land registry), which is paid-per-query — **violates PDIS's "free forever" rule**. Without TABU or an equivalent DB, the automated version isn't feasible. Alternative: manual-operator flow where Amit inputs debtor names he's researched externally, and PDIS matches to existing listings. **Parked pending a change to the free-forever constraint or a manual-workflow design.**
+
+**Also in the brief (for reference):**
+- "Vibe coding" for negotiation — auto-generated call scripts combining signals + market price + target margin. Natural extension of Tier 1, could ship after.
+- Interactive arbitrage calculator (claude.ai chameleon component) — nice UX prototype but Alan's decision: bake the math into PropertyCard, skip the standalone calculator page.
+
+**Next step when we pick this back up:** `/plan` Tier 1 first (fast, self-contained); in parallel, `/plan` a Tier 2 data-source feasibility spike.
 
 ### Playwright-era cleanup
 - Delete `vm-scraper/run.py` (455 lines dead Playwright)

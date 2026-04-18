@@ -31,7 +31,33 @@ QA ran 22/24 PASS (2 env-only Mac failures, not code bugs). Playwright confirmed
 4. Run the 958-row category UPDATE on Neon.
 5. iPhone test the "Run Yad2 now" button.
 
-After all that settles, pick back up the product-direction conversation Alan raised yesterday (distressed sellers / הוצאה לפועל / פשיטות רגל).
+After all that settles, pick back up the product-direction conversation — this session expanded it significantly (see "Strategic vision dump" below).
+
+## Strategic vision dump — "Golden Sources" + "Profit Floor"
+
+End-of-session Alan pasted a detailed strategic brief from his claude.ai "fortress" project chat. Two modules proposed:
+
+**Module 1 — "The Vault" / מקורות הזהב:** separate feed of properties from Israeli receivership (כונס נכסים), bankruptcy (חדלות פירעון), and TASE "Maya" filings. Cross-referenced to existing Yad2/Facebook listings for "Ultra-Distress" triggers. Educational card per property explaining the legal situation in plain Hebrew.
+
+**Module 2 — "Profit Floor" / מחיר רצפה:** reverse-engineered pricing. Take neighborhood rental benchmarks, subtract Amit's target margin, show ONE clear sentence on the card: "אל תשלם יותר מ-X ש״ח בחודש." Stored as `max_negotiation_price` under `signals.py → details`.
+
+Plus a "vibe coding" layer generating call scripts combining signals + market price + target margin.
+
+**Alan's own framing (copied verbatim):**
+> "המחקר יתמקד בהפיכת PDIS ממערכת איתור למערכת קבלת החלטות."
+> ("The research will focus on transforming PDIS from a detection system into a decision-making system.")
+
+**Feasibility broken into three tiers during end-of-session:**
+
+- **Tier 1 — Profit Floor (ships in days, pure PDIS extension).** Math is trivial with existing data (neighborhood rentals, property attributes). No new scrapers. Safest/fastest first win. Recommended next-session `/plan` target.
+- **Tier 2 — The Vault as a standalone feed (ships in weeks, new scrapers).** Maya/Rashumot/insolvency.gov.il each independently scrapable but with narrow TAM per source (Maya is ~500 companies; most distress is private). Needs a feasibility spike BEFORE any scraper code — 90 min hands-on testing of each source.
+- **Tier 3 — Automated Ultra-Distress cross-referencing (BLOCKED).** Requires debtor-name → property-address mapping, which needs TABU (paid). Violates "free forever" rule. Parked pending constraint change OR a manual-operator workflow design.
+
+**Alan's claude.ai brief also included an interactive arbitrage calculator (chameleon component).** Decision: skip the standalone calculator page; bake the math into PropertyCard as part of Tier 1.
+
+**Alan's claude.ai chat also asked if he should generate a full "technical spec document for the CTO."** Recommendation given: NO — the vision is mature, the data reality is untested. Drafting a spec now would bake in unvalidated scrapability assumptions. Better flow: `/plan` Tier 1 → feasibility spike Tier 2 → decide whether Tier 2 is worth building → only THEN write a formal spec if wanted.
+
+Full three-tier breakdown is captured as a structured NOT-STARTED item in TASKS.md.
 
 ## Watch out for
 
