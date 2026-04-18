@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { formatPrice, formatPricePerSqm } from '../lib/format';
+import { logEvent } from '../lib/telemetry';
 import ImageViewer from './ImageViewer';
 
 interface PropertyCardProps {
@@ -190,11 +191,11 @@ export default function PropertyCard({
               onClick={(e) => {
                 e.stopPropagation();
                 setPhoneRevealed(true);
-                fetch('/api/log-reveal', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ yad2_id: yad2Id }),
-                }).catch(() => {/* fire-and-forget */});
+                logEvent(
+                  'phone_reveal',
+                  { source: item?.source, price: item?.price },
+                  { yad2_id: yad2Id }
+                );
               }}
               aria-label="Reveal phone number"
               title="Tap to reveal phone"

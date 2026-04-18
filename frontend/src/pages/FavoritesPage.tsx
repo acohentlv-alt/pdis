@@ -1,4 +1,5 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
+import { logEvent } from '../lib/telemetry';
 import FilterBar from '../components/FilterBar';
 import FilterDrawer from '../components/FilterDrawer';
 import PropertyCard from '../components/PropertyCard';
@@ -132,6 +133,9 @@ export default function FavoritesPage() {
     return () => clearTimeout(timer);
   }, [keyword]);
 
+  // Empty state telemetry — only fires once per empty-state encounter per session
+  const emptyStateLoggedRef = useRef<string | null>(null);
+
   const { data: favData, isLoading: favLoading } = useFavorites();
   const { data: whitelistPropsData, isLoading: whitelistLoading } = useWhitelistProperties();
   const { data: blacklistPropsData, isLoading: blacklistLoading } = useBlacklistProperties();
@@ -180,6 +184,23 @@ export default function FavoritesPage() {
   }, [tab, favData, whitelistPropsData, blacklistPropsData]);
 
   const isLoading = tab === 'favorites' ? favLoading : tab === 'whitelist' ? whitelistLoading : blacklistLoading;
+
+  // Empty state telemetry — only log when favorites tab is empty and data has loaded.
+  // Skip whitelist/blacklist: those being empty is the normal starting state.
+  useEffect(() => {
+    if (tab !== 'favorites') return;
+    if (isLoading) return;
+    const count = favData?.favorites?.length ?? 0;
+    if (count === 0) {
+      const key = 'favorites_empty';
+      if (emptyStateLoggedRef.current !== key) {
+        emptyStateLoggedRef.current = key;
+        logEvent('empty_state', { view: 'favorites' }, {}, 'warn');
+      }
+    } else {
+      emptyStateLoggedRef.current = null;
+    }
+  }, [tab, isLoading, favData?.favorites?.length]);
 
   const filtered = useMemo(
     () => applyFilters(

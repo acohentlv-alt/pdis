@@ -8,7 +8,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from psycopg.rows import dict_row
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 
 import structlog
@@ -1258,6 +1258,96 @@ async def get_event_properties(
     return {"properties": [dict(r) for r in rows]}
 
 
+# ---------------------------------------------------------------------------
+# UI telemetry — write and read endpoints
+# POST must precede GET /api/ui-events/recent-issues to keep specific before generic
+# ---------------------------------------------------------------------------
+
+class UIEventBody(BaseModel):
+    event_name: str = Field(..., min_length=1, max_length=64)
+    severity: str = Field(default='info', pattern='^(info|warn|error)$')
+    yad2_id: str | None = None
+    property_id: int | None = None
+    session_id: str = Field(..., min_length=1, max_length=64)
+    metadata: dict = Field(default_factory=dict)
+
+
+@router.post("/api/ui-events")
+async def log_ui_event(body: UIEventBody):
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            resolved_pid = body.property_id
+            if resolved_pid is None and body.yad2_id:
+                await cur.execute(
+                    "SELECT id FROM properties WHERE yad2_id = %s LIMIT 1",
+                    (body.yad2_id,)
+                )
+                row = await cur.fetchone()
+                if row:
+                    resolved_pid = row["id"]
+
+            meta = dict(body.metadata)
+            if resolved_pid:
+                await cur.execute(
+                    "SELECT signal_details FROM property_classifications WHERE property_id = %s",
+                    (resolved_pid,)
+                )
+                row = await cur.fetchone()
+                if row and row.get("signal_details"):
+                    sd = row["signal_details"]
+                    meta["signals_strong"] = sd.get("strong_signals", [])
+                    meta["signals_weak"] = sd.get("weak_signals", [])
+                    meta["buyer_fit_tags"] = sd.get("buyer_fit_tags", [])
+
+            await cur.execute(
+                """INSERT INTO ui_events (event_name, severity, property_id, session_id, metadata)
+                   VALUES (%s, %s, %s, %s, %s::jsonb)""",
+                (body.event_name, body.severity, resolved_pid, body.session_id, json.dumps(meta))
+            )
+        await conn.commit()
+    return {"ok": True}
+
+
+# IMPORTANT: /api/ui-events/recent-issues BEFORE any future /api/ui-events/{id}
+@router.get("/api/ui-events/recent-issues")
+async def recent_issues(hours: int = 168):
+    hours = max(1, min(hours, 720))
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("""
+                SELECT id, event_name, severity, session_id, property_id, metadata,
+                       (created_at AT TIME ZONE 'Asia/Jerusalem')::text AS created_at_ilt
+                FROM ui_events
+                WHERE severity = 'error' AND created_at >= NOW() - make_interval(hours => %s)
+                ORDER BY created_at DESC
+                LIMIT 50
+            """, (hours,))
+            errors = await cur.fetchall()
+            await cur.execute("""
+                SELECT id, event_name, severity, session_id, property_id, metadata,
+                       (created_at AT TIME ZONE 'Asia/Jerusalem')::text AS created_at_ilt
+                FROM ui_events
+                WHERE severity = 'warn' AND created_at >= NOW() - make_interval(hours => %s)
+                ORDER BY created_at DESC
+                LIMIT 50
+            """, (hours,))
+            warnings = await cur.fetchall()
+            await cur.execute("""
+                SELECT
+                  COUNT(*) FILTER (WHERE event_name = 'page_view') AS page_views_24h,
+                  COUNT(*) FILTER (WHERE event_name = 'phone_reveal') AS phone_reveals_24h,
+                  COUNT(DISTINCT session_id) AS sessions_24h
+                FROM ui_events
+                WHERE created_at >= NOW() - INTERVAL '24 hours'
+            """)
+            summary = await cur.fetchone()
+    return {
+        "errors": [dict(r) for r in errors],
+        "warnings": [dict(r) for r in warnings],
+        "summary": dict(summary) if summary else {"page_views_24h": 0, "phone_reveals_24h": 0, "sessions_24h": 0},
+    }
+
+
 @router.get("/api/events")
 async def list_events(
     property_id: int | None = Query(default=None),
@@ -2266,10 +2356,6 @@ class FacebookIngestBody(BaseModel):
     posts: list[FacebookPost]
 
 
-class LogRevealBody(BaseModel):
-    yad2_id: str
-
-
 async def _get_facebook_preset_id() -> int | None:
     """Return the search_preset id for the FB source preset, or None if not found."""
     async with _db.pool.connection() as conn:
@@ -2380,27 +2466,6 @@ async def fb_ingest_health():
         "last_check_at": last_check_at,
         "alert": warning_count >= 2,
     }
-
-
-@router.post("/api/log-reveal")
-async def log_reveal(body: LogRevealBody):
-    """Log a phone reveal event for any property. Unauthed."""
-    async with _db.pool.connection() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute(
-                "SELECT id FROM properties WHERE yad2_id = %s",
-                (body.yad2_id,),
-            )
-            prop = await cur.fetchone()
-            if not prop:
-                raise HTTPException(status_code=404, detail="Property not found")
-
-            await cur.execute(
-                "INSERT INTO operator_notes (property_id, note, created_by) VALUES (%s, 'phone_revealed', 'system')",
-                (prop["id"],),
-            )
-        await conn.commit()
-    return {"status": "logged"}
 
 
 @router.post("/api/ingest/facebook")

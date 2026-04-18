@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
+import { logEvent } from '../lib/telemetry';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import SummaryBar from '../components/SummaryBar';
@@ -8,6 +9,7 @@ import PropertyCard from '../components/PropertyCard';
 import PresetManager from '../components/PresetManager';
 import PullToRefresh from '../components/PullToRefresh';
 import { usePresetProperties, useAllPresets, useAmitFitProperties, useCustomSearch, useFavoriteIds, useWhitelistIds, useBlacklistIds, useScanStatus } from '../api/queries';
+import { apiFetch } from '../api/client';
 import type { CustomSearchCriteria } from '../api/queries';
 import { useAddFavorite, useRemoveFavorite, useWhitelist, useRemoveWhitelist, useBlacklist, useRemoveBlacklist } from '../api/mutations';
 import { matchesPresetCriteria } from '../lib/presetMatch';
@@ -267,9 +269,8 @@ export default function OpportunityPage() {
   // FB ingest health check — polled on mount
   const [fbHealthAlert, setFbHealthAlert] = useState(false);
   useEffect(() => {
-    fetch('/api/ingest/facebook/health')
-      .then(r => r.json())
-      .then((data: { alert?: boolean }) => { if (data.alert) setFbHealthAlert(true); })
+    apiFetch<{ alert?: boolean }>('/api/ingest/facebook/health')
+      .then((data) => { if (data.alert) setFbHealthAlert(true); })
       .catch(() => {/* ignore — non-critical */});
   }, []);
 
@@ -405,6 +406,23 @@ export default function OpportunityPage() {
     (source ? 1 : 0) +
     (signalFilters.length > 0 ? 1 : 0)
   ), [minPrice, maxPrice, minSqm, maxSqm, minPriceSqm, maxPriceSqm, neighborhoods, selectedRooms, source, signalFilters]);
+
+  // Empty state telemetry — one event per session per empty-state render, not per rerender
+  const emptyStateLoggedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (isLoading) return;
+    const view = isAmitFitRent ? 'amit_fit_rent' : isAmitFitBuy ? 'amit_fit_buy' : isCustom ? 'custom' : `preset_${selectedPresetId}`;
+    const isEmpty = matchingItems.length === 0 && otherItems.length === 0 && allPresets.length > 0;
+    if (isEmpty) {
+      const key = `${view}:${JSON.stringify({ neighborhoods, selectedRooms, source, activeStatFilter })}`;
+      if (emptyStateLoggedRef.current !== key) {
+        emptyStateLoggedRef.current = key;
+        logEvent('empty_state', { view, filters: { neighborhoods, selectedRooms, source, activeStatFilter } }, {}, 'warn');
+      }
+    } else {
+      emptyStateLoggedRef.current = null;
+    }
+  }, [isLoading, matchingItems.length, otherItems.length, allPresets.length, isAmitFitRent, isAmitFitBuy, isCustom, selectedPresetId, neighborhoods, selectedRooms, source, activeStatFilter]);
 
   const greeting = (() => {
     const hour = new Date().getHours();

@@ -531,6 +531,34 @@ async def run_migrations() -> None:
             """)
             await cur.execute("INSERT INTO ingest_state (source) VALUES ('facebook') ON CONFLICT (source) DO NOTHING")
 
+            # UI telemetry event log — captures frontend errors, warns, page views, phone reveals
+            await cur.execute("""
+                CREATE TABLE IF NOT EXISTS ui_events (
+                    id              BIGSERIAL PRIMARY KEY,
+                    event_name      TEXT NOT NULL,
+                    severity        TEXT NOT NULL DEFAULT 'info'
+                                      CHECK (severity IN ('info', 'warn', 'error')),
+                    property_id     INTEGER REFERENCES properties(id),
+                    session_id      TEXT NOT NULL,
+                    metadata        JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            await cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_ui_events_name_time
+                  ON ui_events(event_name, created_at DESC)
+            """)
+            await cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_ui_events_prop_time
+                  ON ui_events(property_id, created_at DESC)
+                  WHERE property_id IS NOT NULL
+            """)
+            await cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_ui_events_sev_time
+                  ON ui_events(severity, created_at DESC)
+                  WHERE severity != 'info'
+            """)
+
             # Add progress column to scan_sessions for live progress bar
             await cur.execute(
                 "ALTER TABLE scan_sessions ADD COLUMN IF NOT EXISTS progress INTEGER DEFAULT 0"
