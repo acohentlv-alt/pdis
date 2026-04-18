@@ -227,7 +227,14 @@ async def custom_search(
             await cur.execute(
                 f"""
                 SELECT
-                    p.*,
+                    p.id, p.yad2_id, p.preset_id, p.category, p.source, p.price, p.rooms,
+                    p.floor, p.total_floors, p.square_meters, p.square_meter_build,
+                    p.property_type, p.description, p.contact_name, p.contact_phone,
+                    p.address_street, p.address_home_number, p.neighborhood, p.hood_id,
+                    p.image_urls, p.listing_url, p.days_on_market, p.first_seen,
+                    p.updated_at, p.latitude, p.longitude, p.parking, p.elevator,
+                    p.safe_room, p.balcony, p.pets_allowed, p.furnished,
+                    p.air_conditioning, p.is_agent, p.agent_office,
                     pc.signal_details,
                     (
                         SELECT ARRAY_AGG(DISTINCT p2.source)
@@ -360,7 +367,14 @@ async def get_preset_properties(
             await cur.execute(
                 f"""
                 SELECT
-                    p.*,
+                    p.id, p.yad2_id, p.preset_id, p.category, p.source, p.price, p.rooms,
+                    p.floor, p.total_floors, p.square_meters, p.square_meter_build,
+                    p.property_type, p.description, p.contact_name, p.contact_phone,
+                    p.address_street, p.address_home_number, p.neighborhood, p.hood_id,
+                    p.image_urls, p.listing_url, p.days_on_market, p.first_seen,
+                    p.updated_at, p.latitude, p.longitude, p.parking, p.elevator,
+                    p.safe_room, p.balcony, p.pets_allowed, p.furnished,
+                    p.air_conditioning, p.is_agent, p.agent_office,
                     pc.signal_details,
                     (
                         SELECT ARRAY_AGG(DISTINCT p2.source)
@@ -784,7 +798,16 @@ async def get_amit_fit_properties(
             select_params = (preset_ids, category, per_page, offset) if category else (preset_ids, per_page, offset)
             await cur.execute(
                 f"""
-                SELECT p.*, pc.signal_details,
+                SELECT
+                    p.id, p.yad2_id, p.preset_id, p.category, p.source, p.price, p.rooms,
+                    p.floor, p.total_floors, p.square_meters, p.square_meter_build,
+                    p.property_type, p.description, p.contact_name, p.contact_phone,
+                    p.address_street, p.address_home_number, p.neighborhood, p.hood_id,
+                    p.image_urls, p.listing_url, p.days_on_market, p.first_seen,
+                    p.updated_at, p.latitude, p.longitude, p.parking, p.elevator,
+                    p.safe_room, p.balcony, p.pets_allowed, p.furnished,
+                    p.air_conditioning, p.is_agent, p.agent_office,
+                    pc.signal_details,
                     (
                         SELECT ARRAY_AGG(DISTINCT p2.source)
                         FROM property_matches pm

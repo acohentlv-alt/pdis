@@ -1,33 +1,23 @@
 # PDIS — Task List
-*April 18, 2026 (fresh — carried forward from `TASKS_2026-04-18.md`)*
+*April 18, 2026 evening (fresh — carried forward from `TASKS_2026-04-18_morning.md`)*
 
 ---
 
 ## AWAITING QA / VERIFICATION
 
-### Today's shipped work — needs Alan's iPhone test on Render
+### Today's shipped work — needs iPhone test on Render after deploy
 
-- **Telemetry v1 — UX bug detector** (`04b5685`) — `/admin/ux-health` page with red/yellow/green sections, 30s auto-refresh, session grouping, NavBar hidden. New `ui_events` table; `POST /api/ui-events` + `GET /api/ui-events/recent-issues`. `/api/log-reveal` hack fully DELETED (replaced by `phone_reveal` event). `apiFetch` instrumented for `api_error` + `slow_response`. React error boundary + window error listeners. `page_view` tracked via StrictMode-safe useRef guard. `empty_state` events on dashboard + favorites. Local QA: 9/10 passed. Verify on iPhone:
-  - Hard-refresh PWA, tap around 30 seconds
-  - `https://pdis-lsah.onrender.com/admin/ux-health` renders (NO NavBar at bottom)
-  - Red errors section: empty or real errors only — if anything weird appears, expand for metadata
-  - Green summary strip shows `page_views_24h`, `phone_reveals_24h`, `sessions_24h`
-  - Tap phone reveal on a property → event appears in admin page within 30s
-  - **Known 0-severity:** `/favorites` fires TWO `page_view` events per visit because it redirects to `/listings`. Admin counts slightly inflated, no data corruption. Cosmetic only.
+- **List-endpoint payload shrink** (this session's commit) — `SELECT p.*` replaced with an explicit 35-column list in three endpoints: `get_preset_properties`, `get_amit_fit_properties` (fetch only), `custom_search` in [pdis/api/routes.py](pdis/api/routes.py). Drops `raw_data` (9 KB JSONB blob per row) and 18 other unused columns. Local QA passed 7/7: preset 44 payload **8.6 MB → 3.9 MB (-54.6%)**, custom search **10.2 MB → 4.6 MB (-55.6%)**, row counts identical. Detail endpoint untouched (still carries `raw_data`). Verify on iPhone:
+  - Open preset 44 (Madlan) on `https://pdis-lsah.onrender.com` — first cards should render in ~2-3s, not 8-14s
+  - `/admin/ux-health` should stop accumulating `slow_response` warnings on `/api/presets/%/properties%` over 24h
+  - `curl -w "size=%{size_download} time=%{time_total}s" https://pdis-lsah.onrender.com/api/presets/44/properties?per_page=2000` — expect size ~3.9 MB
 
-- **Neon stale-connection pool fix** (`c0d0433`) — Added `check=AsyncConnectionPool.check_connection` + `max_idle=240.0` to the async DB pool. Fixes the "SSL connection closed unexpectedly" errors the `/api/debug/recent-errors` buffer had been catching (17 in 24h prior). Verify:
-  - `curl https://pdis-lsah.onrender.com/api/debug/recent-errors | jq '.count'` over next 24h — should stay flat after new traffic, NOT accumulate SSL-closed errors
-  - After 24h clean, remove or gate `/api/debug/recent-errors` (separate task in NOT STARTED)
+### Still pending from the morning handoff
 
-### Still pending from yesterday's (Apr 17) session
-
-- **Split `is_active` into `scan_enabled` + `is_visible`** (`c2682b9`) — PresetManager toggle pattern. Verify on iPhone:
-  - Dashboard pills do NOT show presets 9, 12, 13, 44
-  - PresetManager "Show hidden" toggle reveals them greyed out
-  - Kebab menu shows "Hide from app" / "Show in app"
-  - Green dot on each row toggles scan_enabled independently
-  - Tomorrow's 08:00 IDT VM run includes Madlan (preset 44 scans) but excludes preset 9
-  - Old `?is_active=true` query param still works as deprecated alias
+- **Telemetry v1** (`04b5685`) — `/admin/ux-health` already verified in Alan's iPhone screenshot today. Red section was only QA test noise (cleaned up). Green section shows `page_views_24h=32, phone_reveals_24h=1, sessions_24h=18`. One real signal caught: the Madlan latency bug, now fixed.
+- **Neon stale-connection pool fix** (`c0d0433`) — 24h quiet window ends tomorrow morning. Verify: `curl https://pdis-lsah.onrender.com/api/debug/recent-errors | jq '.count'` stays flat (no new `SSL connection closed unexpectedly`).
+- **Split `is_active` → `scan_enabled` + `is_visible`** (`c2682b9`) — backend verified; **Alan has not yet iPhone-tested the PresetManager kebab menu / Show hidden toggle**.
+- **VM deploy of new `run_yad2.py`** — **done this session** (git pull on `~/pdis` + `sudo cp` to `/opt/pdis-yad2-scraper/`). Tomorrow's 08:00 IDT run is the first to use the new `scan_enabled` filter + `$HomeNum` stripping.
 
 ### Still pending from earlier sessions
 
@@ -50,25 +40,17 @@
 
 ## READY TO RUN (Alan's hands)
 
-### 🛑 Shut down FB pipeline — STILL URGENT ($5/day bleed)
+### Optional: disable the failing FB timer
 
-Carried from yesterday. Not done during today's session. Two steps:
-
-1. **SSH to Oracle VM** and disable the systemd timer:
-   ```
-   ssh -i ~/.ssh/oracle_vm ubuntu@129.159.158.214
-   sudo systemctl disable --now pdis-fb-scraper.timer
-   ```
-2. **Flip `FB_INGESTION_ENABLED=false` on Render** (belt-and-suspenders).
-
-### Git pull on Oracle VM (from yesterday's is_active split)
-
-`vm-scraper/run_yad2.py` now filters on `scan_enabled` instead of `is_active`:
-
+FB scraper is self-failing at 10:02 IDT every day because the Apify free $5 trial is exhausted (confirmed today: `pdis-fb-scraper.service` returns exit 1, was spending $0/day for 8 days). Daily log noise only, no cost. If you want a clean `systemctl status`:
 ```
 ssh -i ~/.ssh/oracle_vm ubuntu@129.159.158.214
-cd ~/vm-scraper && git pull
+sudo systemctl disable --now pdis-fb-scraper.timer
 ```
+
+### Git pull on Oracle VM — DONE this session ✅
+
+Was on yesterday's list. Done: `~/pdis` pulled (was 50+ commits behind), `run_yad2.py` copied to `/opt/pdis-yad2-scraper/`, verified on-disk filter is now `scan_enabled`.
 
 ### Enter Florentin rent feature adjustments via unlocked UI
 
@@ -86,14 +68,22 @@ Covers 4.5% of TLV/Haifa only. SSH to VM → `govmap` tmux session → `run_govm
 
 ## NOT STARTED
 
+### 🆕 Same payload bloat in `/api/favorites`, `/api/whitelist`, `/api/blacklist`
+
+Reviewer flagged that these three endpoints (`pdis/api/routes.py:1709, 1731, 1870`) also `SELECT p.*` and render through the same `PropertyCard`. Out of scope for today's brief but the exact same 35-column swap applies. Plan a follow-up.
+
+### 🆕 New product direction — "companies that need to sell" (הוצאה לפועל / פשיטות רגל)
+
+Alan raised at end-of-session. Needs its own /plan brief: data sources, what "distressed company" means for rental/sale listings, feasibility of scraping execution-office / bankruptcy filings in Israel, how this changes PDIS's scope (currently listing-centric → becomes owner-centric too).
+
 ### 🧹 Playwright-era cleanup — delete `vm-scraper/run.py` + fix `tests/test_fb_parser.py`
 
 - Delete `vm-scraper/run.py` (455 lines dead Playwright) + update `vm-scraper/run.sh` to invoke `apify_to_pdis.py`.
 - Fix `tests/test_fb_parser.py` — imports helpers from `run.py`.
 
-### 🆕 Remove or gate `/api/debug/recent-errors`
+### Remove or gate `/api/debug/recent-errors`
 
-Shipped as temporary diagnostic (`ebe4b11`). After 24h of clean logs post pool fix (`c0d0433`), gate behind `DEBUG_ENDPOINTS_ENABLED` env flag or remove.
+Shipped as temporary diagnostic (`ebe4b11`). After 24h of clean logs post pool fix (`c0d0433`), gate behind `DEBUG_ENDPOINTS_ENABLED` env flag or remove. Partial: telemetry is now the primary UX-error surface; the `recent-errors` buffer is mostly duplicative.
 
 ### Amit Fit category filter ignored
 
@@ -103,13 +93,9 @@ From Apr 17 QA: `/api/amit-fit/properties?category=rent` and `?category=forsale`
 
 After 1 week of `scan_enabled`/`is_visible` running clean (target: ~Apr 24), drop the column + remove `?is_active` alias.
 
-### 🆕 FB city bleed — non-TLV posts mislabeled as TLV
+### 🆕 FB city bleed — MOOT (FB pipeline self-stopped)
 
-Moot if FB pipeline shut down (per READY TO RUN above).
-
-### 🆕 FB volume guard always rejects daily batch
-
-Moot if FB pipeline shut down.
+### 🆕 FB volume guard always rejects — MOOT
 
 ### 🆕 Mystery error — investigate (low priority)
 
@@ -117,21 +103,18 @@ Session `s194` has `error_message="server conn crashed?"`. String doesn't exist 
 
 ### 🆕 Fix double `page_view` on redirect aliases (LOW priority)
 
-Today's telemetry fires TWO `page_view` events when navigating to `/favorites` because it redirects to `/listings`. Fix options: debounce with 50ms window, OR hardcode alias list. Cosmetic — admin counts slightly inflated. Only worth doing if admin page becomes noisy.
+Telemetry fires TWO `page_view` events on `/favorites` (redirects to `/listings`). Cosmetic.
 
-### 🧹 Clean test/QA `ui_events` from prod DB
+### 🧹 Clean test/QA `ui_events` from prod DB — PARTIAL
 
-Today's QA session left synthetic events in the `ui_events` table with session_ids starting with `qa-session-`, `qa_test`, etc. Low priority — they won't pollute real metrics since the admin page filters by severity and these are mostly `info`. Optional cleanup:
-```sql
-DELETE FROM ui_events WHERE session_id LIKE 'qa-%' OR event_name LIKE 'qa_%';
-```
+Session `5d5cfd73...` and `qa-check` events deleted today (19 rows). `qa-%` / `qa_%` prefix patterns still match whatever residual test events exist. Low priority.
 
 ### 🧭 STRATEGIC — remaining bets from Apr 15 product analysis
 
-1. **~~Telemetry~~ ✅ SHIPPED today** (`04b5685`) — as UX bug detector rather than conversion analytics.
+1. ~~Telemetry~~ ✅ SHIPPED Apr 17 — caught the Madlan latency bug on day 1.
 2. **"Since yesterday" daily feed** (1-2d).
 3. **Push notifications (web PWA)** (2-3d).
-4. **Phone reveals as North Star metric** — telemetry now captures `phone_reveal`, need 30 days of data before validating.
+4. **Phone reveals as North Star metric** — telemetry captures it; need ~30 days.
 5. **Signals as narrative, one headline per card** (0.5d).
 6. **Ingest health dot in header** (0.5d).
 7. **Tests on signals/matching/events** (3d).
@@ -172,11 +155,12 @@ Remaining after Custom Search pill: sort order, pagination, "save this search".
 
 ### FB Marketplace integration
 
-Revisit only if Groups volume insufficient AND FB pipeline kept alive.
+Revisit only if Groups volume insufficient AND FB pipeline revived.
 
 ---
 
 *Archived sessions:*
-- *TASKS_2026-04-18.md — start-of-Apr-18 state (= Apr 17 evening end-state before today's session).*
-- *TASKS_2026-04-17.md — Apr 17 (post-is_active-split).*
+- *TASKS_2026-04-18_morning.md — Apr 18 morning (carried-forward Apr 17 evening end-state).*
+- *TASKS_2026-04-18.md — start-of-Apr-18 (yesterday evening's end-state).*
+- *TASKS_2026-04-17.md — Apr 17 post-is_active-split.*
 - *TASKS_2026-04-16_evening.md — Apr 16 evening.*
