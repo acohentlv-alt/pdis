@@ -221,10 +221,10 @@ export default function PresetRow({
           return <div className="text-xs text-gray-500 mt-2">Last scan: {timeAgo} · {lastSession.listings_found ?? 0} listings</div>;
         }
         if (lastSession.status === 'error') {
-          return <div className="text-xs text-red-600 mt-2 flex items-center gap-1"><span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />Last scan failed: {lastSession.error_message || 'unknown error'}</div>;
+          return <div className="text-xs text-red-600 mt-2 flex items-center gap-1"><span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />Last scan: {timeAgo} · failed: {lastSession.error_message || 'unknown error'}</div>;
         }
         if (lastSession.status === 'blocked') {
-          return <div className="text-xs text-amber-700 mt-2 flex items-center gap-1"><span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />Last scan blocked — source returned nothing</div>;
+          return <div className="text-xs text-amber-700 mt-2 flex items-center gap-1"><span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />Last scan: {timeAgo} · blocked — source returned nothing</div>;
         }
         if (lastSession.status === 'running') {
           return <div className="text-xs text-blue-600 mt-2">Scan in progress…</div>;
