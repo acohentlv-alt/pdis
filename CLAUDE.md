@@ -101,8 +101,14 @@ Token reuses `gh auth token` (scopes: `repo, gist, read:org, workflow`). If it s
 - Apify provides residential proxies internally — no separate proxy needed
 - 14 active TLV rental groups, `RESULTS_PER_GROUP=5` per run (~70 posts/day)
 - VM script first GETs `/api/ingest/facebook/existing-ids` to skip LLM parsing on already-seen posts
-- Claude Haiku 4.5 (`vm-scraper/llm_parse.py`) extracts structured fields from Hebrew post text (intent, price, sqm, rooms, phone, neighborhood, street/house, is_agent, amenities, available_date)
+- Claude Haiku 4.5 (`vm-scraper/llm_parse.py`) extracts structured fields from Hebrew post text. Returns:
+  - `intent`: one of `rent`, `apartment_forsale`, `building_forsale`, `wanted`, `other`
+  - `sqm_net` (indoor living area) + `sqm_balcony` split separately
+  - `price`, `rooms`, `phone`, `neighborhood`, `street/house`, `is_agent`, `amenities`, `available_date`
+  - Negative guidance in prompt prevents mistaking ארנונה/ועד בית/פיקדון/דמי תיווך as the rent/sale price
+- `apify_to_pdis.py` applies per-intent price sanity bands at unconditional scope (runs even when LLM is skipped/errored): rent 2500–50000, apartment_forsale 300k–50M, building_forsale 5M–200M. Out-of-band → null price + `fb.price_out_of_band` log. `wanted`/`other` → post dropped + `fb.post_dropped` log.
 - POSTs to Render at `POST /api/ingest/facebook` with `INGEST_SECRET` bearer (40 posts/batch)
+- Render-side: `_INTENT_TO_CATEGORY` in `pdis/api/routes.py` collapses `building_forsale`→`forsale` (category column has CHECK constraint of only rent/forsale in some tables) while preserving the original intent in `properties.raw_data.fb_intent` for future filtering. Legacy `intent="sale"` is remapped to `apartment_forsale` for backward compat. Unknown intents logged via `fb.unknown_intent` and skipped.
 - Gated by `FB_INGESTION_ENABLED` flag (must be true on Render)
 - Health tracked in `ingest_state` table (last_ok_at, warning counters); exposed at `GET /api/ingest/facebook/health`
 - Cost: ~$5.80/mo Apify net + ~$1.80/mo Haiku = ~$7.60/mo
@@ -214,6 +220,10 @@ FastAPI matches routes top-to-bottom. Path parameter routes (`{preset_id}`, `{ya
 - `/api/favorites/ids` BEFORE `/api/favorites/{yad2_id}`
 - `/api/presets/stats/latest` BEFORE `/api/presets/{preset_id}`
 - `/api/events/properties` BEFORE `/api/events`
+
+## API Response Conventions
+
+- Property-returning endpoints emit `display_sqm = COALESCE(square_meter_build, square_meters)` via the `_property_to_dict(row)` helper in `pdis/api/routes.py`. Frontend reads ONLY `display_sqm` — never coalesce on the client. Raw fields `square_meter_build` and `square_meters` remain on the response for debugging, not for UI consumption.
 
 ---
 
