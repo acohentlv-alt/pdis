@@ -35,9 +35,7 @@ export default function PropertyCard({
   const sd = getSignalDetails(item);
 
   const price = item.price as number | null;
-  const sqmBuild = item.square_meter_build as number | null;
-  const sqmTotal = item.square_meters as number | null;
-  const sqm = sqmBuild || sqmTotal;
+  const sqm = item.display_sqm as number | null;
   const dom = (item.days_on_market as number) ?? 0;
   const neighborhood = item.neighborhood as string | null;
 
@@ -95,7 +93,7 @@ export default function PropertyCard({
   const whatIsItParts: string[] = [];
   if (propertyType) whatIsItParts.push(propertyType.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()));
   if (rooms != null) whatIsItParts.push(`${String(rooms)} rooms`);
-  if (sqm) whatIsItParts.push(`${String(sqm)}m\u00B2${sqmBuild && sqmTotal && sqmBuild !== sqmTotal ? ` (${String(sqmTotal)} total)` : ''}`);
+  if (sqm) whatIsItParts.push(`${String(sqm)}m\u00B2`);
   const whatIsIt: string = whatIsItParts.join(' \u00B7 ');
 
   const priceDropTitle = `${String(sd.price_drops)}x drop, largest ${Number(sd.largest_drop_pct || 0).toFixed(1)}%${sd.last_price_drop_date ? `\nLast: ${String(sd.last_price_drop_date)}` : ''}`;

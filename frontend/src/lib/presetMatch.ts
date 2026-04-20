@@ -5,9 +5,7 @@ export function matchesPresetCriteria(
   const price = property.price as number | null;
   const rooms = property.rooms as number | null;
   const propType = property.property_type as string | null;
-  const sqmBuild = property.square_meter_build as number | null;
-  const sqmTotal = property.square_meters as number | null;
-  const sqm = sqmBuild || sqmTotal;
+  const sqm = property.display_sqm as number | null;
 
   if (preset.min_price != null && price != null && price < (preset.min_price as number)) return false;
   if (preset.max_price != null && price != null && price > (preset.max_price as number)) return false;

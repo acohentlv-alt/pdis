@@ -231,6 +231,7 @@ def main() -> None:
             if len(image_urls) >= 8:
                 break
         author_name = (item.get("user") or {}).get("name")
+        _sqm_regex = extract_sqm(text)
         base = {
             "post_id": str(legacy_id),
             "group_url": fb_url,
@@ -241,7 +242,9 @@ def main() -> None:
             "contact_phone": extract_phone(text),
             "price": extract_price(text),
             "rooms": extract_rooms(text),
-            "square_meters": extract_sqm(text),
+            "sqm_net": _sqm_regex,
+            "sqm_balcony": None,
+            "intent": None,
             "neighborhood": extract_neighborhood(text),
             "address_city": None,
             "floor": None,
@@ -256,7 +259,7 @@ def main() -> None:
 
     def _count(posts_list, keys):
         return {k: sum(1 for p in posts_list if p.get(k) is not None) for k in keys}
-    before = _count(posts, ["price", "square_meters", "rooms", "contact_phone", "neighborhood"])
+    before = _count(posts, ["price", "sqm_net", "rooms", "contact_phone", "neighborhood"])
     print(f"Regex extraction: {before}", flush=True)
 
     if _LLM_ENABLED:
@@ -292,8 +295,12 @@ def main() -> None:
             # Override fields only if LLM returned a non-null value; keep regex otherwise
             if result.get("price_ils") is not None:
                 p["price"] = int(result["price_ils"])
-            if result.get("sqm") is not None:
-                p["square_meters"] = int(result["sqm"])
+            if result.get("sqm_net") is not None:
+                p["sqm_net"] = int(result["sqm_net"])
+            if result.get("sqm_balcony") is not None:
+                p["sqm_balcony"] = int(result["sqm_balcony"])
+            if result.get("intent"):
+                p["intent"] = str(result["intent"])
             if result.get("rooms") is not None:
                 p["rooms"] = float(result["rooms"])
             if result.get("phone"):
@@ -328,8 +335,46 @@ def main() -> None:
             f"cost=${cost['usd']:.4f}",
             flush=True,
         )
-        after = _count(posts[:limit], ["price", "square_meters", "rooms", "contact_phone", "neighborhood"])
+        after = _count(posts[:limit], ["price", "sqm_net", "rooms", "contact_phone", "neighborhood"])
         print(f"After LLM: {after}", flush=True)
+
+    # --- Per-intent sanity bands (runs for ALL posts, regardless of LLM) ---
+    # Band rules: null the price if out of range; drop the post if intent is wanted/other.
+    _PRICE_BANDS: dict[str, tuple[int, int]] = {
+        "rent": (2500, 50_000),
+        "apartment_forsale": (300_000, 50_000_000),
+        "building_forsale": (5_000_000, 200_000_000),
+    }
+    _DROP_INTENTS = {"wanted", "other"}
+    filtered_posts: list[dict] = []
+    dropped_count = 0
+    out_of_band_count = 0
+    for p in posts:
+        intent = p.get("intent")
+        if intent in _DROP_INTENTS:
+            print(
+                f"fb.post_dropped post_id={p['post_id']} intent={intent}",
+                flush=True,
+            )
+            dropped_count += 1
+            continue
+        if intent in _PRICE_BANDS and p.get("price") is not None:
+            lo, hi = _PRICE_BANDS[intent]
+            if not (lo <= p["price"] <= hi):
+                print(
+                    f"fb.price_out_of_band post_id={p['post_id']} intent={intent} "
+                    f"received_price={p['price']}",
+                    flush=True,
+                )
+                p["price"] = None
+                out_of_band_count += 1
+        filtered_posts.append(p)
+    print(
+        f"Sanity bands: dropped={dropped_count} price_nulled={out_of_band_count} "
+        f"remaining={len(filtered_posts)}",
+        flush=True,
+    )
+    posts = filtered_posts
 
     headers = {
         "Authorization": f"Bearer {INGEST_SECRET}",

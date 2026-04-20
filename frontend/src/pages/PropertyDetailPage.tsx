@@ -78,9 +78,7 @@ export default function PropertyDetailPage() {
   const sd = (classification?.signal_details as Record<string, unknown>) ?? {};
 
   const price = prop.price as number | null;
-  const sqmBuild = prop.square_meter_build as number | null;
-  const sqmTotal = prop.square_meters as number | null;
-  const sqm = sqmBuild || sqmTotal;
+  const sqm = prop.display_sqm as number | null;
   const dom = (prop.days_on_market as number) ?? 0;
 
   // Signal details — support both new tier-based and old shapes
@@ -218,7 +216,7 @@ export default function PropertyDetailPage() {
         </div>
         <div className="text-2xl font-bold text-gray-900">{formatPrice(price)}</div>
         <div className="text-sm text-gray-500 flex gap-3">
-          {sqm && <span>{sqm}m²{sqmBuild && sqmTotal && sqmBuild !== sqmTotal ? ` (${sqmTotal} total)` : ''}</span>}
+          {sqm && <span>{sqm}m²</span>}
           <span>{formatPricePerSqm(price, sqm)}</span>
         </div>
       </div>
