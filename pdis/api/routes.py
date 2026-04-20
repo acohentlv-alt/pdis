@@ -25,6 +25,30 @@ router = APIRouter()
 
 _URL_RE = re.compile(r"https?://\S+")
 
+# Maps FB intent values to the category stored in properties.category.
+# "wanted" and "other" are not mapped here — posts with those intents are
+# dropped by the VM before reaching this endpoint; if they slip through they
+# fall back to "rent" via dict.get default.
+_INTENT_TO_CATEGORY = {
+    "rent": "rent",
+    "apartment_forsale": "forsale",
+    "building_forsale": "forsale",
+}
+
+# Intents accepted by the ingest endpoint (after legacy remap).
+_FB_KNOWN_INTENTS = {"rent", "apartment_forsale", "building_forsale", "wanted", "other"}
+
+
+def _property_to_dict(row) -> dict:
+    """Convert a DB row (dict or Row-like) to a plain dict with display_sqm added.
+
+    display_sqm = square_meter_build if set, else square_meters.
+    Both raw fields are preserved in the output.
+    """
+    d = dict(row)
+    d["display_sqm"] = d.get("square_meter_build") or d.get("square_meters")
+    return d
+
 
 def _scrub_error_message(msg: str | None) -> str | None:
     """Truncate to 200 chars and replace URLs with [url]."""
@@ -401,7 +425,7 @@ async def get_preset_properties(
         "total": total,
         "page": page,
         "per_page": per_page,
-        "properties": [dict(r) for r in rows],
+        "properties": [_property_to_dict(r) for r in rows],
     }
 
 
@@ -836,7 +860,7 @@ async def get_amit_fit_properties(
         "total": total,
         "page": page,
         "per_page": per_page,
-        "properties": [dict(r) for r in rows],
+        "properties": [_property_to_dict(r) for r in rows],
     }
 
 
@@ -1066,7 +1090,7 @@ async def list_properties(
         "total": total,
         "page": page,
         "per_page": per_page,
-        "properties": [dict(r) for r in rows],
+        "properties": [_property_to_dict(r) for r in rows],
     }
 
 
@@ -1106,7 +1130,7 @@ async def search_properties(q: str = "", category: str | None = Query(default=No
             )
             rows = await cur.fetchall()
 
-    return {"properties": [dict(r) for r in rows]}
+    return {"properties": [_property_to_dict(r) for r in rows]}
 
 
 @router.get("/api/properties/{yad2_id}")
@@ -1195,7 +1219,7 @@ async def get_property(yad2_id: str):
             await cur.execute("SELECT 1 FROM favorites WHERE property_id = %s", (prop["id"],))
             is_favorited = await cur.fetchone() is not None
 
-    result = dict(prop)
+    result = _property_to_dict(prop)
     result["snapshots"] = [dict(s) for s in snapshots]
     result["classification"] = dict(classification_row) if classification_row else None
     result["notes"] = [dict(n) for n in notes_rows]
@@ -1301,7 +1325,7 @@ async def get_event_properties(
             )
             rows = await cur.fetchall()
 
-    return {"properties": [dict(r) for r in rows]}
+    return {"properties": [_property_to_dict(r) for r in rows]}
 
 
 # ---------------------------------------------------------------------------
@@ -1743,7 +1767,7 @@ async def list_whitelist():
                 ORDER BY w.created_at DESC
             """)
             rows = await cur.fetchall()
-    return {"total": len(rows), "properties": [dict(r) for r in rows]}
+    return {"total": len(rows), "properties": [_property_to_dict(r) for r in rows]}
 
 
 @router.get("/api/blacklist")
@@ -1765,7 +1789,7 @@ async def list_blacklist():
                 ORDER BY b.created_at DESC
             """)
             rows = await cur.fetchall()
-    return {"total": len(rows), "properties": [dict(r) for r in rows]}
+    return {"total": len(rows), "properties": [_property_to_dict(r) for r in rows]}
 
 
 class ListReason(BaseModel):
@@ -1905,7 +1929,7 @@ async def list_favorites():
                 ORDER BY f.created_at DESC
             """)
             rows = await cur.fetchall()
-    return {"total": len(rows), "favorites": [dict(r) for r in rows]}
+    return {"total": len(rows), "favorites": [_property_to_dict(r) for r in rows]}
 
 
 @router.post("/api/favorites/{yad2_id}")
@@ -2385,7 +2409,9 @@ class FacebookPost(BaseModel):
     contact_phone: str | None = None
     price: int | None = None
     rooms: float | None = None
-    square_meters: int | None = None
+    sqm_net: Optional[int] = None
+    sqm_balcony: Optional[int] = None
+    intent: str | None = None
     neighborhood: str | None = None
     address_city: str | None = None
     address_street: str | None = None
@@ -2450,10 +2476,19 @@ async def _fb_post_to_listing(post: FacebookPost) -> ScrapedListing | None:
 
     address_city = GROUP_CITY_MAP.get(post.group_id, TLV_CITY_STRING)
 
+    # Resolve category from intent; default to "rent" for null/unknown intent.
+    category = _INTENT_TO_CATEGORY.get(post.intent or "", "rent")
+
+    # sqm_net → square_meter_build (net interior); total = net + balcony → square_meters
+    sqm_net = post.sqm_net
+    sqm_balcony = post.sqm_balcony
+    square_meter_build = sqm_net
+    square_meters = (sqm_net + (sqm_balcony or 0)) if sqm_net is not None else None
+
     return ScrapedListing(
         yad2_id=f"fb_{post.post_id}",
         source="facebook",
-        category="rent",
+        category=category,
         address_street=post.address_street,
         address_home_number=str(post.address_home_number) if post.address_home_number is not None else None,
         address_city=address_city,
@@ -2461,8 +2496,8 @@ async def _fb_post_to_listing(post: FacebookPost) -> ScrapedListing | None:
         rooms=post.rooms,
         floor=post.floor,
         total_floors=None,
-        square_meters=post.square_meters,
-        square_meter_build=None,
+        square_meters=square_meters,
+        square_meter_build=square_meter_build,
         price=post.price,
         currency="ILS",
         property_type=None,
@@ -2475,6 +2510,7 @@ async def _fb_post_to_listing(post: FacebookPost) -> ScrapedListing | None:
         author_name=post.author_name,
         group_url=post.group_url,
         like_count=post.like_count,
+        raw_data={"fb_intent": post.intent} if post.intent else {},
     )
 
 
@@ -2536,9 +2572,20 @@ async def fb_ingest(request: Request, body: FacebookIngestBody, background_tasks
     if preset_id is None:
         raise HTTPException(status_code=500, detail="Facebook preset not found — migration may not have run")
 
-    # Build ScrapedListings, skipping posts with empty description AND no phone
+    # Build ScrapedListings, skipping posts with invalid/unknown intent or empty description+phone
     listings: list[ScrapedListing] = []
     for post in body.posts:
+        # Remap legacy "sale" intent to the canonical name
+        if post.intent == "sale":
+            post.intent = "apartment_forsale"
+        # Warn and skip posts with an unrecognized intent
+        if post.intent is not None and post.intent not in _FB_KNOWN_INTENTS:
+            logger.warning(
+                "fb.unknown_intent",
+                post_id=post.post_id,
+                received=post.intent,
+            )
+            continue
         listing = await _fb_post_to_listing(post)
         if listing is not None:
             listings.append(listing)

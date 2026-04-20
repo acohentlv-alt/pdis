@@ -60,7 +60,7 @@ function applyFilters(
   if (minPSqm !== null || maxPSqm !== null) {
     result = result.filter(i => {
       const price = i.price as number | null;
-      const sqm = (i.square_meter_build as number | null) || (i.square_meters as number | null);
+      const sqm = i.display_sqm as number | null;
       if (!price || !sqm || sqm === 0) return false;
       const priceSqm = price / sqm;
       if (minPSqm !== null && priceSqm < minPSqm) return false;
@@ -78,8 +78,8 @@ function applyFilters(
   // Sqm range
   const minS = minSqm !== '' ? Number(minSqm) : null;
   const maxS = maxSqm !== '' ? Number(maxSqm) : null;
-  if (minS !== null) result = result.filter(i => ((i.square_meter_build as number) ?? (i.square_meters as number) ?? 0) >= minS);
-  if (maxS !== null) result = result.filter(i => ((i.square_meter_build as number) ?? (i.square_meters as number) ?? Infinity) <= maxS);
+  if (minS !== null) result = result.filter(i => ((i.display_sqm as number) ?? 0) >= minS);
+  if (maxS !== null) result = result.filter(i => ((i.display_sqm as number) ?? Infinity) <= maxS);
 
   // Signal filter — OR semantics
   if (signalFilters.length > 0) {
@@ -98,8 +98,8 @@ function applyFilters(
       return ((b.days_on_market as number) ?? 0) - ((a.days_on_market as number) ?? 0);
     }
     if (sortBy === 'price_sqm') {
-      const aPsqm = ((a.price as number) ?? 0) / (((a.square_meter_build as number) || (a.square_meters as number)) || 1);
-      const bPsqm = ((b.price as number) ?? 0) / (((b.square_meter_build as number) || (b.square_meters as number)) || 1);
+      const aPsqm = ((a.price as number) ?? 0) / ((a.display_sqm as number) || 1);
+      const bPsqm = ((b.price as number) ?? 0) / ((b.display_sqm as number) || 1);
       return aPsqm - bPsqm;
     }
     // default: most signals first

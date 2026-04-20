@@ -21,9 +21,21 @@ _MODEL = "claude-haiku-4-5-20251001"
 _SYSTEM_PROMPT = """You extract structured real-estate info from Hebrew Facebook posts in TLV rental/sale groups.
 
 Return ONLY a JSON object with these fields (null if not in text — NEVER invent):
-- intent: "rent" | "sale" | "wanted" | "other"
-- price_ils: integer NIS (monthly for rent, total for sale) or null
-- sqm: integer square meters or null
+- intent: "rent" | "apartment_forsale" | "building_forsale" | "wanted" | "other"
+  * "rent" — landlord or tenant offering/seeking a rental
+  * "apartment_forsale" — single apartment for sale
+  * "building_forsale" — entire building or multi-unit asset for sale
+  * "wanted" — someone searching for a property to rent or buy (NOT the landlord)
+  * "other" — anything unrelated (commercial, parking only, shout-outs, etc.)
+- price_ils: integer NIS or null
+  * For rent: monthly rent amount
+  * For sale: total purchase price
+  * CRITICAL: Do NOT return sqm as price. Do NOT return price-per-sqm as price.
+  * Do NOT return ארנונה / ועד בית / פיקדון / דמי תיווך / חניה / מחסן / חשמל / מים
+    as the price. If the only number looks like one of those fees, return null.
+- sqm_net: integer — net interior area in square meters, or null
+- sqm_balcony: integer — balcony/porch area in square meters, or null
+  (extract separately from text like "50 מ״ר + מרפסת 10")
 - rooms: float (half-rooms allowed: 2.5, 3.5) or null
 - phone: string (Israeli mobile, digits only, e.g. "0521234567") or null
 - street_address: Hebrew street name without house number (e.g. "אבן גבירול", "דיזנגוף") or null
@@ -48,7 +60,24 @@ Return ONLY a JSON object with these fields (null if not in text — NEVER inven
 - available_date: ISO date "YYYY-MM-DD" or null
 - confidence: 0.0 to 1.0 — how confident are you in the overall extraction
 
-Output valid JSON only. No commentary."""
+Output valid JSON only. No commentary.
+
+Examples:
+1. Rent: "להשכרה דירת 3 חדרים, 50 מ\"ר + מרפסת 10, קומה 2, פלורנטין, 6500 לחודש, 052-1234567"
+   → {"intent":"rent","price_ils":6500,"sqm_net":50,"sqm_balcony":10,"rooms":3.0,"phone":"0521234567","neighborhood":"פלורנטין","floor":2,"confidence":0.95,...}
+
+2. Apartment for sale: "מוכרים דירת 4 חדרים ברוטשילד, 90 מ\"ר, קומה 5, מחיר 3,200,000 ₪"
+   → {"intent":"apartment_forsale","price_ils":3200000,"sqm_net":90,"sqm_balcony":null,"rooms":4.0,"neighborhood":"רוטשילד","floor":5,"confidence":0.93,...}
+
+3. Building for sale: "בניין למכירה, 8 יחידות, דיזנגוף, 12 מיליון ₪"
+   → {"intent":"building_forsale","price_ils":12000000,"sqm_net":null,"sqm_balcony":null,"rooms":null,"neighborhood":"דיזנגוף","confidence":0.88,...}
+
+4. Wanted: "מחפש דירת 2-3 חדרים בצפון תל אביב, עד 7000 לחודש, נא לפנות ל-050-9876543"
+   → {"intent":"wanted","price_ils":null,"sqm_net":null,"sqm_balcony":null,"rooms":null,"phone":"0509876543","confidence":0.92,...}
+
+5. Other (ארנונה trap): "דירה להשכרה, ארנונה 580 לחודש, ועד 200, פיקדון 2 חודשים"
+   → {"intent":"rent","price_ils":null,"sqm_net":null,"sqm_balcony":null,"rooms":null,"confidence":0.4,...}
+   (price_ils is null because 580 is ארנונה, not rent — the actual rent is not stated)"""
 
 
 def _extract_json(text: str) -> dict | None:

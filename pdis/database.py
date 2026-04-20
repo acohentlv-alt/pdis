@@ -303,35 +303,6 @@ async def run_migrations() -> None:
             ]:
                 await cur.execute(f"ALTER TABLE properties ADD COLUMN IF NOT EXISTS {col_def}")
 
-            # Backfill enrichment columns from raw_data for existing properties
-            await cur.execute("""
-                UPDATE properties SET
-                    source = 'yad2',
-                    latitude = (raw_data->'coordinates'->>'latitude')::real,
-                    longitude = (raw_data->'coordinates'->>'longitude')::real,
-                    parking = COALESCE(raw_data->>'Parking_text', '') != '',
-                    elevator = COALESCE(raw_data->>'Elevator_text', '') != '',
-                    safe_room = COALESCE(raw_data->>'mamad_text', '') != '',
-                    renovated = COALESCE(raw_data->>'Meshupatz_text', '') != '',
-                    balcony = COALESCE(raw_data->>'Porch_text', '') != '' AND COALESCE(raw_data->>'Porch_text', '') != 'אין',
-                    pets_allowed = COALESCE(raw_data->>'PetsInHouse_text', '') != '',
-                    furnished = COALESCE(raw_data->>'Furniture_text', '') != '',
-                    air_conditioning = COALESCE(raw_data->>'AirConditioner_text', '') != '',
-                    is_agent = COALESCE((raw_data->>'merchant')::boolean, false),
-                    agent_office = raw_data->>'merchant_name',
-                    move_in_date = CASE WHEN raw_data->>'date_of_entry' IS NOT NULL AND raw_data->>'date_of_entry' != ''
-                                   THEN (raw_data->>'date_of_entry')::date ELSE NULL END,
-                    hood_id = (raw_data->>'hood_id')::integer,
-                    customer_id = raw_data->>'customer_id',
-                    accessibility = COALESCE(raw_data->>'handicapped_text', '') != ''
-                WHERE source IS NULL
-                  AND yad2_id NOT LIKE 'fb_%'
-                  AND yad2_id NOT LIKE 'madlan_%'
-            """)
-            rowcount = cur.rowcount
-            if rowcount and rowcount > 0:
-                logger.warning("db.migration_updated_rows", count=rowcount)
-
             await cur.execute("""
                 CREATE TABLE IF NOT EXISTS property_operator_input (
                     id              SERIAL PRIMARY KEY,
