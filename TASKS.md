@@ -41,7 +41,21 @@ Also scp the updated `vm-scraper/run.sh` (from PR #3 — now calls `apify_to_pdi
 
 ---
 
+## 🔄 FOLLOW-UPS — same stale-conn risk in other loops
+
+- `pdis/scanner.py:_upsert_properties` — per-row loop over all scraped listings (1194 on Madlan). Survived session 268 but close to Neon's 5-min idle-kill window. Apply same `executemany` pattern as the `classification.py` fix. Needs its own `/plan`.
+- `pdis/scanner.py:_create_snapshots` — per-listing SELECT + INSERT = ~2400 round-trips on 1194 rows. Same risk when VM scans grow.
+- `pdis/matching.py:backfill_year_built_from_buildings` (around line 754) — per-property SELECT + UPDATE loop. Was the last step logged before session 268 crashed — may be the setup victim that left the connection in a dying state.
+
+---
+
 ## AWAITING QA / VERIFICATION
+
+### Madlan→VM migration + stale-conn fix — DONE, awaiting push
+- Madlan→VM migration shipped: cron-job.org retired, `/api/scan/scheduled` deleted, VM systemd timer at 06:00 IDT running daily.
+- `classification.py` stale-conn fix applied: replaced per-row `execute` loop with single `executemany` call — keeps connection hold time under 1s for 1000+ rows.
+- Session 268 was the test-fire — scrape + events + matching landed clean; signals/stats failed at the crash point. This fix closes that last loose end.
+- **Push to main before 06:00 IDT tomorrow so the VM `git pull` picks it up before the next scan.**
 
 ### Madlan→VM migration (pending Alan's VM setup + QA)
 - `vm-scraper/run_madlan.py` + `run_madlan.sh` + systemd units created
