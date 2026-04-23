@@ -17,4 +17,7 @@ set -a
 source .env
 set +a
 
+# Allow `from pdis...` imports — this runner reuses run_all_scans() from the main package
+export PYTHONPATH=/opt/pdis-madlan-scraper
+
 exec /usr/bin/python3 -u vm-scraper/run_madlan.py
