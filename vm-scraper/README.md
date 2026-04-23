@@ -11,7 +11,7 @@ endpoint — no Playwright, no cookies, no proxy on the VM.
 
 - Orchestrator: `apify_to_pdis.py`
 - LLM parse: `llm_parse.py`
-- Entry: `run.sh` → `run.py` (systemd: `pdis-fb-scraper.timer`, daily 10:00 IDT)
+- Entry: `run.sh` → `apify_to_pdis.py` (systemd: `pdis-fb-scraper.timer`, daily 10:00 IDT)
 - Group catalog: upsert via `scripts/seed_fb_groups.py` reading
   `scripts/fb_groups_discovered.json`
 - Env: `APIFY_TOKEN`, `ANTHROPIC_API_KEY`, `INGEST_SECRET`, `PDIS_API_URL`
