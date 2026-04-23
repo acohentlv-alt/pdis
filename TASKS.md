@@ -106,7 +106,6 @@ WHERE sp.id = p.preset_id
 
 ### Still pending from earlier
 - **Telemetry v1** (`04b5685`) — caught Madlan bug on day 1, working as intended
-- **Neon pool fix** (`c0d0433`) — 24h quiet window ends tomorrow morning; `/api/debug/recent-errors` should stay flat
 - **Split `is_active` → `scan_enabled` + `is_visible`** (`c2682b9`) — backend verified, iPhone test still pending
 - Fire-and-forget ingest, low-volume guard, DB-backed scan lock, events.py N+1 fix — passive monitoring
 - Custom Search pill, VM-side retry on 5xx — tomorrow's scan is the test
@@ -153,9 +152,6 @@ The exciting part: a Yad2 card lights up because its owner is in insolvency. Req
 
 **Next step when we pick this back up:** `/plan` Tier 1 first (fast, self-contained); in parallel, `/plan` a Tier 2 data-source feasibility spike.
 
-### Remove or gate `/api/debug/recent-errors`
-Temporary diagnostic (`ebe4b11`). Gate behind `DEBUG_ENDPOINTS_ENABLED` or remove after pool fix 24h-clean.
-
 ### Amit Fit category filter ignored
 `/api/amit-fit/properties?category=rent` and `?category=forsale` both return 81 rows. Silent param-ignore.
 
@@ -197,6 +193,7 @@ Moot while FB pipeline dormant.
 ## DONE (today — Apr 23)
 
 - Playwright-era cleanup — delete `vm-scraper/run.py` (455 lines dead), fix `tests/test_fb_parser.py` imports, update `vm-scraper/run.sh` to invoke `apify_to_pdis.py`.
+- Removed `/api/debug/recent-errors` endpoint — temporary diagnostic (`ebe4b11`), pool fix proven stable, 5+ days past the 24h monitoring window. Removed `RECENT_ERRORS` deque buffer, buffer-build block, `traceback`/`deque`/`datetime` imports.
 
 ---
 
