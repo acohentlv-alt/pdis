@@ -1,5 +1,5 @@
 # PDIS — Claude Code Operating Guide
-*Last updated: April 15, 2026 (govmap signals removed, FB Apify pipeline live)*
+*Last updated: April 23, 2026 (Madlan moved to Oracle VM, /api/scan/scheduled retired)*
 
 ---
 
@@ -15,7 +15,7 @@ Alan is not a coder. Every explanation must be in **plain English**. Explain the
 
 PDIS (Property Distress Intelligence System) is a rental property monitoring tool for the Israeli market. It scans Yad2, Madlan, and Facebook Groups for rental listings in Tel Aviv, tracks them over time, and detects distress signals (price drops, relistings, long time on market, urgent language, etc.). Built for Alan's friend Shechter.
 
-**How it works:** Automated scans run on a daily schedule — Yad2 (both rent + forsale) from Oracle VM at 10:00 IDT (systemd timer, consolidated 2026-04-18); Madlan via cron-job.org → Render at 10:00 IDT (verify second daily slot, if any, in the cron-job.org dashboard); Facebook from Oracle VM at 10:00 IDT (systemd timer). Shechter opens the mobile-first web app and sees fresh opportunities — properties where the landlord might be desperate (price dropped, relisted multiple times, been listed too long).
+**How it works:** Automated scans run on a daily schedule — Yad2 (both rent + forsale) from Oracle VM at 10:00 IDT (systemd timer, consolidated 2026-04-18); Madlan from Oracle VM at 06:00 IDT (systemd timer); Facebook from Oracle VM at 10:00 IDT (systemd timer). Shechter opens the mobile-first web app and sees fresh opportunities — properties where the landlord might be desperate (price dropped, relisted multiple times, been listed too long).
 
 ---
 
@@ -28,7 +28,7 @@ python3 -m uvicorn pdis.api.main:app --port 8000 --reload
 ```
 
 - Database is on **Neon** (cloud PostgreSQL)
-- `.env` has `DATABASE_URL` and `CRON_SECRET`
+- `.env` has `DATABASE_URL`
 - Frontend is React (Vite) — build with `cd frontend && npm run build`
 - FastAPI serves the built frontend as static files with SPA catch-all routing
 - `--reload` picks up backend changes automatically; frontend needs `npm run build`
@@ -170,12 +170,7 @@ run_scan(preset_id):
 
 `run_all_scans()` runs all active presets sequentially, then detects removals.
 
-### Scheduled Scans
-- External cron (cron-job.org) POSTs to `POST /api/scan/scheduled` at 10:00 IDT (verified 2026-04-16 from cron-job.org dashboard screenshot — second daily slot, if any, not confirmed; check dashboard)
-- Requires `Authorization: Bearer {CRON_SECRET}` header
-- Fires scan as background task, returns immediately
-- DB-backed lock prevents overlapping scans — checks scan_sessions for status='running' within a 30-min stale window. Stale sessions auto-expire to 'error'.
-- `GET /api/scan/status` returns `{"running": true/false}`
+Scheduled triggering happens from VM systemd timers (Yad2 10:00, Madlan 06:00, FB 10:00). No external cron service.
 
 ---
 
@@ -215,7 +210,7 @@ Whitelist surfaces a property regardless of signals; blacklist hides it.
 FastAPI matches routes top-to-bottom. Path parameter routes (`{preset_id}`, `{yad2_id}`) capture string literals if registered first.
 
 **Critical ordering:**
-- `/api/scan/all` and `/api/scan/scheduled` BEFORE `/api/scan/{preset_id}`
+- `/api/scan/all` BEFORE `/api/scan/{preset_id}`
 - `/api/favorites/ids` BEFORE `/api/favorites/{yad2_id}`
 - `/api/presets/stats/latest` BEFORE `/api/presets/{preset_id}`
 - `/api/events/properties` BEFORE `/api/events`
@@ -271,7 +266,7 @@ FastAPI matches routes top-to-bottom. Path parameter routes (`{preset_id}`, `{ya
 
 - **Target:** Render (auto-deploys on push to main) — live at https://pdis-lsah.onrender.com
 - **Database:** Neon (cloud PostgreSQL)
-- **Scheduled scans:** cron-job.org → `POST /api/scan/scheduled` with `CRON_SECRET`
+- **Scheduled scans:** VM systemd timers (see "What runs where")
 - **Build:** `pip install -r requirements.txt && cd frontend && npm install && npm run build`
 - **Start:** `uvicorn pdis.api.main:app --host 0.0.0.0 --port $PORT`
 
@@ -280,7 +275,7 @@ FastAPI matches routes top-to-bottom. Path parameter routes (`{preset_id}`, `{ya
 | Source | Runs on | Reason |
 |--------|---------|--------|
 | Yad2 rent | Oracle VM (`vm-scraper/run_yad2.py`) | consolidated with forsale on VM 2026-04-18 after /rent began blocking on Render IPs; single daily 10:00 IDT run |
-| Madlan | Render | PerimeterX cookie enough; no browser needed |
+| Madlan | Oracle VM (vm-scraper/run_madlan.py) | Moved off Render 2026-04-23 to retire the broken /api/scan/scheduled background-task path. Daily 06:00 IDT systemd timer. |
 | Yad2 forsale | Oracle VM (`vm-scraper/run_yad2.py`) | `/forsale` IP-blocked by ShieldSquare on Render; consolidated with rent, single daily 10:00 IDT run |
 | Facebook Groups | Apify (cloud) + Oracle VM orchestrator | Apify scrapes via residential proxies; VM systemd timer triggers daily at 10:00 IDT |
 | Govmap backfill | Oracle VM (`vm-scraper/run_govmap.py`) | Long-running backfill, tmux/persistent disk |
@@ -306,7 +301,6 @@ Backfill script: `vm-scraper/run_govmap.py` on the Oracle VM. POSTs in batches t
 | Var | Purpose |
 |-----|---------|
 | `DATABASE_URL` | Neon PostgreSQL connection string |
-| `CRON_SECRET` | Bearer for cron-job.org → `/api/scan/scheduled` |
 | `INGEST_SECRET` | Bearer for VM scrapers → `/api/ingest/*` |
 | `FB_INGESTION_ENABLED` | bool, gate for `/api/ingest/facebook` |
 | `FB_SCANS_PER_DAY` | int, FB VM scan cadence (1 during probation, 2 normal) |

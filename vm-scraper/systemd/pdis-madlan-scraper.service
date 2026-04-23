@@ -1,0 +1,12 @@
+[Unit]
+Description=PDIS Madlan scheduled scan (preset 44 + removal detection)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ubuntu
+Type=oneshot
+WorkingDirectory=/opt/pdis-madlan-scraper
+ExecStart=/opt/pdis-madlan-scraper/vm-scraper/run_madlan.sh
+StandardOutput=append:/var/log/pdis-madlan-scraper.log
+StandardError=append:/var/log/pdis-madlan-scraper.log

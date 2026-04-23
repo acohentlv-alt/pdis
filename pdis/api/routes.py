@@ -878,28 +878,6 @@ async def trigger_all_scans():
     return {"scans": results}
 
 
-@router.post("/api/scan/scheduled")
-async def trigger_scheduled_scan(request: Request, background_tasks: BackgroundTasks):
-    """Endpoint for external cron service. Requires CRON_SECRET auth."""
-    from pdis.config import settings
-
-    # Check auth
-    auth_header = request.headers.get("Authorization", "")
-    expected = f"Bearer {settings.cron_secret}"
-    if not settings.cron_secret or auth_header != expected:
-        raise HTTPException(status_code=403, detail="Invalid or missing cron secret")
-
-    # Check if scan already running
-    from pdis.scanner import get_scan_status, scheduled_scan
-    status = await get_scan_status()
-    if status["running"]:
-        raise HTTPException(status_code=409, detail="Scan already in progress")
-
-    # Fire and forget
-    background_tasks.add_task(scheduled_scan)
-    return {"status": "started", "message": "Scan triggered in background"}
-
-
 @router.get("/api/scan/status")
 async def scan_status():
     """Check if a scan is currently running."""

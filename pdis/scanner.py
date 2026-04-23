@@ -925,19 +925,6 @@ async def _is_scan_running() -> bool:
     return row is not None
 
 
-async def scheduled_scan() -> dict:
-    """Called by the cron endpoint. Runs all scans — DB-backed lock checked by caller."""
-    try:
-        results = await run_all_scans()
-        return {"status": "done", "presets": len(results), "results": results}
-    except Exception as e:
-        log.error("scan.scheduled.error", error=str(e))
-        return {"status": "error", "error": str(e)}
-    finally:
-        global _scan_progress
-        _scan_progress = None
-
-
 async def get_scan_status() -> dict:
     """Current scan running state. DB-backed lock + module progress."""
     return {

@@ -20,7 +20,6 @@ class Settings(BaseSettings):
     api_port: int = 8090
     log_level: str = "INFO"
     log_format: str = "json"
-    cron_secret: str = ""
     ingest_secret: str = ""
     fb_ingestion_enabled: bool = False
     fb_scans_per_day: int = 2

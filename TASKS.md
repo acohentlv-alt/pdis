@@ -43,6 +43,13 @@ Also scp the updated `vm-scraper/run.sh` (from PR #3 — now calls `apify_to_pdi
 
 ## AWAITING QA / VERIFICATION
 
+### Madlan→VM migration (pending Alan's VM setup + QA)
+- `vm-scraper/run_madlan.py` + `run_madlan.sh` + systemd units created
+- `POST /api/scan/scheduled` endpoint deleted from routes.py; `scheduled_scan()` wrapper deleted from scanner.py
+- VM setup: clone repo to `/opt/pdis-madlan-scraper`, install deps, write `.env` with `DATABASE_URL`, install + enable systemd timer
+- First run: `systemctl start pdis-madlan-scraper.service` then check `/var/log/pdis-madlan-scraper.log`
+- cron-job.org job can be disabled/deleted after first successful VM run confirmed
+
 ### PR #3 — Playwright cleanup + debug endpoint removal (merged Apr 23)
 - Verify Render deploy of `c08d01c` succeeded
 - `curl https://pdis-lsah.onrender.com/api/debug/recent-errors` → 404 (will be SPA catch-all 200; inspect response body for `<!doctype html>`)
