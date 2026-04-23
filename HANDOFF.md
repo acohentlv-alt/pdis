@@ -67,11 +67,19 @@ Alan noticed Madlan hadn't scanned on schedule for ~5 days. Investigation:
 - `pdis-madlan-scraper.timer` enabled, next fire tomorrow **06:00:15 IDT**
 - Log file: `/var/log/pdis-madlan-scraper.log`
 
-### What's in flight at end-session
+### Late-session update — wrong fix, found real one
 
-**Third test-fire (post-executemany fix) is still running** as of ~14:47 IDT — in the backfill step that immediately preceded the prior crash. If it completes with `madlan_vm.done` and `signals.persisted count=~1200`, the fix works. If it crashes the same way, the problem is NOT the single loop we fixed — it's elsewhere in the tail (likely `_upsert_properties` or `backfill_year_built_from_buildings`, both already flagged in TASKS FOLLOW-UPS).
+Test-fire #2 (session 275, post-executemany) **crashed the same way** at 14:53:08. The executemany change was a real improvement but targeted the wrong loop.
 
-**First thing tomorrow: check `/var/log/pdis-madlan-scraper.log` on VM + scan_session 275 in Neon** to see the test-fire verdict.
+**Real root cause:** `pdis/signals.py:90-171` opens a pool connection (`async with _db.pool.connection() as conn:`) and inside that block calls `compute_building_comps_batch` — which has a **1194-iteration per-property loop** (N+1, each call opens its own pool conn). The OUTER `conn` sits idle for 5-6 minutes during that loop, Neon idle-kills it, and the surrounding `async with conn:` raises on exit.
+
+**Commit `4ace127`** dedents the `compute_building_comps_batch` call out of the outer `async with conn:` block. Three lines, one indent change. No reason to hold the outer conn during that loop — it's not used.
+
+Test-fire #3 was kicked off at end-session after this fix pushed. Monitor is watching for `signals.persisted` or another `server conn crashed?`.
+
+**First thing tomorrow: check `/var/log/pdis-madlan-scraper.log` on VM.**
+- If you see `signals.persisted count=~1200` followed by `madlan_vm.done status=done`: fix is correct, migration is fully shipped.
+- If you see another `server conn crashed?`: the underlying architecture (N+1 in comps_batch) is also a problem. Next step would be batching the closed_transactions query by lat/lng envelope once for the whole batch instead of per-property. That's a real `/plan` task, not a 3-line fix.
 
 ### Manual action still needed from Alan
 
