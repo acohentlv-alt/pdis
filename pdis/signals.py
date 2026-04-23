@@ -166,9 +166,14 @@ async def compute_signals_batch(property_ids: list[int]) -> dict[int, dict]:
                 if r.get("neighborhood"):
                     fa_by_name[(r["neighborhood"], r["category"])] = dict(r)
 
-        # BATCH QUERY 6: closed-sale comps per property
-        from pdis.comps import compute_building_comps_batch
-        comps_by_pid = await compute_building_comps_batch(property_ids)
+    # BATCH QUERY 6: closed-sale comps per property
+    # NOTE: Must be OUTSIDE the `async with conn:` block above — this call
+    # loops 1000+ times internally, each grabbing its own pool connection.
+    # If we held the outer conn during that loop, Neon would idle-kill it
+    # at ~5 min and the surrounding `async with` would raise on exit
+    # (crashed session 268 + 275, 2026-04-23).
+    from pdis.comps import compute_building_comps_batch
+    comps_by_pid = await compute_building_comps_batch(property_ids)
 
     # Build threshold lookup dicts
     by_hood_id: dict[tuple, list[dict]] = {}
