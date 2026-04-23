@@ -43,6 +43,57 @@ Recommended order: 1 → 3 → 2 (safest to risky). #1 is the natural next `/pla
 
 ---
 
+---
+
+## Appended — late-afternoon Madlan→VM migration (Claude Opus 4.7 session)
+
+### What happened
+
+Alan noticed Madlan hadn't scanned on schedule for ~5 days. Investigation:
+1. **Discovered cron-job.org was firing daily with 200 OK** (Alan confirmed via screenshot), but Render's `BackgroundTask` was dying silently after the response — no scan_session rows being created despite the "success."
+2. **Confirmed the VM already had the latest FB scripts** deployed (MD5 match) — earlier HANDOFFs saying "VM deploy deferred" for `llm_parse.py`+`apify_to_pdis.py` were stale.
+3. **Facebook still returns 402 Payment Required** — Apify $5 trial exhausted. Known, parked pending top-up.
+
+### What we shipped (3 commits on main)
+
+- **`848483d`** — Move Madlan scheduled scan to Oracle VM; retire `/api/scan/scheduled`. New `vm-scraper/run_madlan.{py,sh}` + systemd units firing daily at 06:00 IDT. Deleted `trigger_scheduled_scan` route + `scheduled_scan` wrapper + `cron_secret` config field. CLAUDE.md + TASKS.md updated.
+- **`a31c2db`** — First test-fire crashed on `ModuleNotFoundError: No module named 'pdis'`. Added `export PYTHONPATH=/opt/pdis-madlan-scraper` to `run_madlan.sh`.
+- **`01e0f39`** — Second test-fire (session 268) ran successfully through scrape + upsert + events + matching, then crashed inside `persist_signals_batch` with `server conn crashed?` — Neon killed the connection because the per-row INSERT loop held it open for 5+ min. Fix: replace per-row loop with single `executemany` call. Connection hold time drops from minutes to <1s.
+
+### VM state as of end-session
+
+- `/opt/pdis-madlan-scraper/` cloned with full repo + deps installed (`psycopg[binary]`, `psycopg-pool`, `pydantic-settings`, `structlog`, `curl_cffi` already present)
+- `.env` written with `DATABASE_URL` + `YAD2_VM_INGESTION_ENABLED=true` (critical — without it, Yad2 presets don't short-circuit to `skipped_vm`)
+- `pdis-madlan-scraper.timer` enabled, next fire tomorrow **06:00:15 IDT**
+- Log file: `/var/log/pdis-madlan-scraper.log`
+
+### What's in flight at end-session
+
+**Third test-fire (post-executemany fix) is still running** as of ~14:47 IDT — in the backfill step that immediately preceded the prior crash. If it completes with `madlan_vm.done` and `signals.persisted count=~1200`, the fix works. If it crashes the same way, the problem is NOT the single loop we fixed — it's elsewhere in the tail (likely `_upsert_properties` or `backfill_year_built_from_buildings`, both already flagged in TASKS FOLLOW-UPS).
+
+**First thing tomorrow: check `/var/log/pdis-madlan-scraper.log` on VM + scan_session 275 in Neon** to see the test-fire verdict.
+
+### Manual action still needed from Alan
+
+1. **Delete/disable the cron-job.org Madlan job.** It'll start firing HTTP 422s at 10:00 IDT (since `/api/scan/scheduled` is gone and Render now routes it into `POST /api/scan/{preset_id}` which 422's on "scheduled" as non-int). Harmless but annoying.
+2. Optional: remove `CRON_SECRET` env var from Render — nothing reads it anymore.
+
+### Watch out for
+
+- **Session 268 is marked `error` in Neon** with partial data (1039 snapshots + 103 events + 270 classifications + 0 scan_preset_stats). Leave it — tomorrow's 06:00 will heal classifications via `ON CONFLICT DO UPDATE`. One-day cosmetic gap in `scan_preset_stats` for preset 44 is fine.
+- **Yad2 VM at 10:00 and Madlan VM at 06:00 — no collision.** But if someone manually hits "Run Yad2 now" button around 06:00, they'll overlap. The DB-backed `is_scan_running` lock that would have prevented this was removed with the deleted endpoint — per-preset scans don't check it.
+- **CLAUDE.md still says Madlan scan was "10:00 IDT" at one historical point** — updated to 06:00 today, but if you see stale references elsewhere, grep.
+
+### Deferred to separate briefs (in TASKS FOLLOW-UPS)
+
+- `_upsert_properties` (per-row loop, 1194 rows, survived today)
+- `_create_snapshots` (per-listing SELECT+INSERT, 2400 round-trips)
+- `backfill_year_built_from_buildings` (per-property SELECT+UPDATE)
+
+Same `executemany` pattern fixes all three. Worth bundling into one PR this week — they're all variants of the same bug.
+
+---
+
 *Archived sessions:*
 - *HANDOFF_2026-04-19.md — Apr 18-19 late-night Yad2 rent→VM + phone-hook fix.*
 - *HANDOFF_2026-04-18_evening.md — Apr 18 evening Madlan latency fix.*
