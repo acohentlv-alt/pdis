@@ -1,10 +1,6 @@
 #!/bin/bash
 set -euo pipefail
-cd /opt/pdis-fb-scraper
+cd "$(dirname "$0")"
 source .env
 
-if [ -z "${PROXY_URL:-}" ]; then
-    echo "WARN: PROXY_URL not set — running without residential proxy. Account ban risk elevated."
-fi
-
-/usr/bin/python3 run.py
+exec /usr/bin/python3 apify_to_pdis.py

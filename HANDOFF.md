@@ -1,51 +1,89 @@
-# HANDOFF — April 20, 2026
+# HANDOFF — April 18-19, 2026 (late-night session: Yad2 rent→VM + phone-hook fix)
 
 ## What we did today
 
-Shipped PR #2 — three-item cleanup covering FB source labels, Haiku prompt rewrite, and sqm accuracy. Full `/plan → /review → /exec → /qa` cycle ran cleanly (two review rounds caught the sanity-band loop-placement bug and the wrong endpoint list before exec). Ran the Item 1 fix script against Neon: 690 fb_* rows relabeled to `source='facebook'`, 58 stale cross-source matches deleted, 690 stale classifications cleared. Merged branch to main. Render is live with the new code; frontend now reads only `display_sqm`.
+Fixed this morning's Yad2 scraper outage the right way instead of the fast way. `/plan → /review → /exec → /qa` cycle on branch `claude/yad2-vm-rent`, one commit (`0ae108e`), pushed to origin but **deliberately NOT merged to main** — VM must deploy first tomorrow morning before Render picks up the changes, or rent data blanks out for ~24h.
 
-Also investigated the "only 4 Amit Fit rent matches" bug — not a code bug. The `neighborhood_thresholds` table only has rows for פלורנטין. Every other TLV neighborhood is empty, so Amit Fit literally can't match listings outside Florentin. Blocked on Amit's numbers.
+Three things landed in one commit:
 
-## What's half-done / deferred
+- **Yad2 rent routed through Oracle VM** (consolidating with forsale that's been on VM for weeks). Render's IPs began getting blocked on `/rent` around April 17 evening — sessions 203/204/207 today's manual trigger all came back `blocked`. Widened the VM-skip guard in `pdis/scanner.py:603-619` from `category == "forsale"` to all Yad2 when `YAD2_VM_INGESTION_ENABLED=true`. VM's `run_yad2.py` parameterized for rent+forsale (was hardcoded `"category": "forsale"` at line 209, `/forsale` slug in the URL at 351-352). VM timer moved 08:00 → 10:00 IDT to consolidate with the rest of the schedule. Render-side fallback `pdis/scraper.py` **kept in place** as rollback safety — reviewer's call; delete in a week after VM rent proves stable.
 
-- **VM deploy deliberately deferred.** `vm-scraper/llm_parse.py` + `vm-scraper/apify_to_pdis.py` haven't been pushed to the Oracle VM. Alan's reasoning: he's about to add new FB groups (including building-for-sale groups) and receive Amit's threshold data. Better to deploy VM after both land so the first post-deploy scrape categorizes everything correctly end-to-end. The Render/VM schema mismatch is safe in the interim — old VM's `intent="sale"` gets legacy-remapped on Render; old single `sqm` field is silently dropped by Pydantic.
-- **`scripts/fb_price_sweep_20260418.py` not yet run.** Has an interactive y/N gate. Run AFTER VM deploys + one clean scrape completes, so any remaining bad historical prices get nulled while new scrapes are clean.
-- **`scripts/madlan_field_probe.py` not yet run.** Standalone read-only, can run any time. Output feeds a follow-up micro-brief on Madlan GraphQL field fixes (balcony detection + net-sqm).
+- **Phone-hook bug caught + fixed.** During the Yad2 plan, reviewer noticed `_yad2_phone_scan_hook` was called from `run_scan` (Render-side path) but **never from `run_scan_from_listings`** (the VM-ingest path). Bug was introduced in commit `508cada` (Apr 15) when the phone hook was wired in — `run_scan_from_listings` had been generalized for Yad2 two days earlier and the hook-wiring author missed that path. Impact: every VM-ingested Yad2 forsale row since Apr 13 has had NULL `contact_phone`. One-line fix: `scanner.py:805-806` now calls `await _yad2_phone_scan_hook(session_id)` when `source == "yad2"`. Currently dormant because `YAD2_PHONE_FETCH_ENABLED=false` on Render — fix pre-positions the pipeline for the flag-flip.
+
+- **"Run Yad2 now" button in PresetManager modal header.** Render's new `POST /api/scan/yad2/manual` endpoint proxies to a new VM HTTP daemon (`vm-scraper/trigger_server.py`, stdlib-only, bearer-auth on port 8787, 10-minute rate limit, 409 if already running, logs every inbound request). UI reuses the existing `useScanStatus()` polling pattern — the VM's ingest POST creates a `scan_sessions` row with progress, so status flows through the normal plumbing. No new progress mechanism needed.
+
+QA ran 22/24 PASS (2 env-only Mac failures, not code bugs). Playwright confirmed the button renders and the error state shows when the mutation 503s.
+
+## What's half-done / needs attention
+
+- **Branch is 1 commit behind main** (evening's Madlan latency fix). Different code areas — should be conflict-free but worth eyeballing the merge.
+- **Nothing deployed yet.** Code is on `claude/yad2-vm-rent` on GitHub. Tomorrow morning: VM first, then merge to main, then set Render env vars, then SQL cleanup. **Order matters** — see TASKS.md step sequence.
+- **958 rows mistagged** — QA found 958 Yad2 properties under rent presets have `category='forsale'` from the historical `run_yad2.py:209` hardcode bug. One-line UPDATE SQL in TASKS.md step 4. Alan runs it against Neon post-deploy.
+- **Today's Madlan latency fix** (committed to main earlier this evening, commit `9d0bd17`) is independent — still needs iPhone test on Render after deploy.
 
 ## What to do next
 
-**Wait on two external inputs:**
-1. Amit's per-neighborhood threshold data (target_price_per_sqm_preferred + _max per 7 size buckets)
-2. Alan's curated list of new FB groups to add (rent + building-for-sale)
+**Execute TASKS.md steps 1-5 in order, first thing:**
 
-**While waiting — next session's assignment:** clean stale code. Candidates live in TASKS.md under "🧹 Next session" — safest wins are:
-- Delete `vm-scraper/run.py` (455 lines dead Playwright) + fix `tests/test_fb_parser.py` imports
-- Drop `pdis/scraper.py` Yad2-on-Render fallback (target Apr 26, 1 week post-VM-migration)
-- Remove `fetch_item_detail` (dead, per QA finding)
-- Gate or remove `/api/debug/recent-errors` temporary diagnostic
+1. VM deploy (scp + ssh + systemd). Full copy-paste block in TASKS.md. Generate `TRIGGER_SECRET` with `openssl rand -hex 32` and save it.
+2. Merge `claude/yad2-vm-rent` → main via GitHub PR. Render auto-deploys.
+3. Set `VM_TRIGGER_URL` + `VM_TRIGGER_SECRET` env vars on Render.
+4. Run the 958-row category UPDATE on Neon.
+5. iPhone test the "Run Yad2 now" button.
+
+After all that settles, pick back up the product-direction conversation — this session expanded it significantly (see "Strategic vision dump" below).
+
+## Strategic vision dump — "Golden Sources" + "Profit Floor"
+
+End-of-session Alan pasted a detailed strategic brief from his claude.ai "fortress" project chat. Two modules proposed:
+
+**Module 1 — "The Vault" / מקורות הזהב:** separate feed of properties from Israeli receivership (כונס נכסים), bankruptcy (חדלות פירעון), and TASE "Maya" filings. Cross-referenced to existing Yad2/Facebook listings for "Ultra-Distress" triggers. Educational card per property explaining the legal situation in plain Hebrew.
+
+**Module 2 — "Profit Floor" / מחיר רצפה:** reverse-engineered pricing. Take neighborhood rental benchmarks, subtract Amit's target margin, show ONE clear sentence on the card: "אל תשלם יותר מ-X ש״ח בחודש." Stored as `max_negotiation_price` under `signals.py → details`.
+
+Plus a "vibe coding" layer generating call scripts combining signals + market price + target margin.
+
+**Alan's own framing (copied verbatim):**
+> "המחקר יתמקד בהפיכת PDIS ממערכת איתור למערכת קבלת החלטות."
+> ("The research will focus on transforming PDIS from a detection system into a decision-making system.")
+
+**Feasibility broken into three tiers during end-of-session:**
+
+- **Tier 1 — Profit Floor (ships in days, pure PDIS extension).** Math is trivial with existing data (neighborhood rentals, property attributes). No new scrapers. Safest/fastest first win. Recommended next-session `/plan` target.
+- **Tier 2 — The Vault as a standalone feed (ships in weeks, new scrapers).** Maya/Rashumot/insolvency.gov.il each independently scrapable but with narrow TAM per source (Maya is ~500 companies; most distress is private). Needs a feasibility spike BEFORE any scraper code — 90 min hands-on testing of each source.
+- **Tier 3 — Automated Ultra-Distress cross-referencing (BLOCKED).** Requires debtor-name → property-address mapping, which needs TABU (paid). Violates "free forever" rule. Parked pending constraint change OR a manual-operator workflow design.
+
+**Alan's claude.ai brief also included an interactive arbitrage calculator (chameleon component).** Decision: skip the standalone calculator page; bake the math into PropertyCard as part of Tier 1.
+
+**Alan's claude.ai chat also asked if he should generate a full "technical spec document for the CTO."** Recommendation given: NO — the vision is mature, the data reality is untested. Drafting a spec now would bake in unvalidated scrapability assumptions. Better flow: `/plan` Tier 1 → feasibility spike Tier 2 → decide whether Tier 2 is worth building → only THEN write a formal spec if wanted.
+
+Full three-tier breakdown is captured as a structured NOT-STARTED item in TASKS.md.
 
 ## Watch out for
 
-- **Deploy state is intentionally split.** Render has new code, VM has old. Don't let the next agent "fix" this by running the VM deploy — Alan explicitly deferred it. See TASKS.md "DEPLOY PENDING".
-- **Rebase landed cleanly** but dropped the pre-existing "Split is_active" commit from the branch (already on main under a different SHA — safe skip during rebase).
-- **CLAUDE.md was updated** post-merge with the new FB intent schema + `display_sqm` API convention. Committed directly to main as `c1c054c`.
-- **Amit Fit rent count still shows 4** after today's fix. That's expected — it only lifts when Amit's threshold data lands, not from any code change. Do NOT go spelunking for an Amit Fit bug when Alan asks why it's still 4.
-- **Executor made a judgment call** during exec: the brief listed 17 endpoints needing `display_sqm`, but 7 of them don't actually return sqm fields (events, matches, snapshots). Those were left with plain `dict(r)`. Sensible — adding display_sqm=None everywhere is noise.
-- **Round-3 reviewer found `sqmBuild`/`sqmTotal` references left dangling** in PropertyCard.tsx:95 and PropertyDetailPage.tsx:219 after executor's swap. Fixed inline before PR push — verified `tsc --noEmit` clean.
+- **Deploy order is not optional.** If you merge to main before VM deploy, Render starts returning `skipped_vm` for all Yad2 — but VM has the old `run_yad2.py` that only does forsale. Rent data gap for ~24h until VM catches up. The commit message in `0ae108e` spells this out.
+- **`/var/log/` is root-owned on fresh Ubuntu.** Must `sudo touch` + `sudo chown ubuntu:ubuntu` the two log files before starting `pdis-yad2-trigger.service`, or the service crashes on module load. QA caught this locally on Mac (hardcoded path = Mac permission denied). TASKS.md step 1 includes the commands.
+- **`fetch_item_detail` in `pdis/scraper.py` is now dead code.** QA found it defined but uncalled anywhere in `pdis/` after `_backfill_built_sqm` was deleted. Not a bug — gets cleaned up in a week when we delete `scraper.py` entirely per rollback-safety plan.
+- **Branch push, not main push.** This is deliberate. Don't be confused by the HANDOFF being written without a Render deploy in flight — that's tomorrow's job, not tonight's.
+- **Trigger server is bearer-only, no firewall.** Alan couldn't find Render's egress IPs to lock UFW, so we rely on a 32-byte random secret + IP logging on every attempt. If the secret leaks, rotate both ends (VM `.env` TRIGGER_SECRET + Render `VM_TRIGGER_SECRET`) and restart the service.
+- **Executor made three judgment calls worth remembering:** (1) added `httpx>=0.25` to requirements.txt (it was transitive, now explicit — harmless); (2) also removed `fetch_item_detail` from the scanner import since its only caller was deleted; (3) chose inline warning icon + native tooltip over a full toast for the Yad2-trigger error. All sensible.
 
 ## Test these
 
-- [ ] iPhone: open a property card, verify `display_sqm` shows the same value on card and detail page for the same property
-- [ ] iPhone: check that FB rent cards still render sqm (will be from `square_meters`, i.e., old-schema fallback, until VM deploys)
-- [ ] `curl 'https://pdis-lsah.onrender.com/api/presets/8/properties?limit=1' | jq '.properties[0] | {display_sqm, square_meter_build, square_meters}'` — all three present, display_sqm = build OR gross
-- [ ] Render dashboard: confirm `c1c054c` deploy succeeded (doc-only change, should be trivial)
-- [ ] Amit Fit rent count stays at ~4 (expected until thresholds load)
-- [ ] `SELECT source, COUNT(*) FROM properties WHERE yad2_id LIKE 'fb_%' GROUP BY source` on Neon → only `facebook`, no `yad2`
+- [ ] VM `systemctl list-timers pdis-yad2-scraper.timer` → next run is tomorrow 10:00 IDT
+- [ ] VM `curl -s http://localhost:8787/status` → `{"running":false}` (or true if mid-run)
+- [ ] VM `sudo journalctl -u pdis-yad2-trigger.service -n 30` → no errors, service active
+- [ ] Render env vars `VM_TRIGGER_URL` + `VM_TRIGGER_SECRET` set
+- [ ] `curl -X POST https://pdis-lsah.onrender.com/api/scan/yad2/manual` (with whatever auth you use) returns 202 or 503-if-not-configured, NOT 404
+- [ ] Run the 958-row UPDATE; `SELECT sp.category, p.category, COUNT(*) FROM properties p JOIN search_presets sp ON sp.id = p.preset_id WHERE p.source='yad2' GROUP BY 1, 2` should show rent/rent increased, rent/forsale at 0
+- [ ] iPhone tap "Run Yad2 now" — button disables, sessions appear in `/api/scan/sessions`
+- [ ] Tomorrow at 10:00 IDT: fresh Yad2 sessions from VM (rent AND forsale presets), Madlan preset 44 session, Yad2 presets on Render all `skipped_vm`
+- [ ] After 10:00 run: `/admin/ux-health` — no new `slow_response` for Yad2 scrape (since Render is no longer scraping)
+- [ ] (From evening session) iPhone preset 44 Madlan: cards render 2-3s not 8-14s
 
 ---
 
 *Archived sessions:*
-- *HANDOFF_2026-04-19.md — Apr 18-19 late-night session: Yad2 rent→VM + phone-hook fix, queued morning deploy, strategic vision dump.*
-- *HANDOFF_2026-04-18_evening.md — Apr 18 evening Madlan latency fix.*
-- *HANDOFF_2026-04-18_morning.md — Apr 17-18 day→evening pool fix + telemetry.*
+- *HANDOFF_2026-04-18_evening.md — Apr 18 evening (Madlan latency fix + VM git pull + FB-pipeline mystery resolved).*
+- *HANDOFF_2026-04-18_morning.md — Apr 17-18 day→evening (pool fix + telemetry).*
 - *HANDOFF_2026-04-17.md — Apr 17 is_active split session.*
