@@ -3,6 +3,32 @@
 
 ---
 
+## 🔥 BROKEN — PDIS laptop daemon has been silently failing
+
+**Discovered 2026-04-25** during Agentic OS planning session.
+
+**Symptom:** `com.pdis.fb-daemon` launchd job last exit status = `2` (error). The job is loaded and keeps retrying, but the daemon log (`~/pdis/laptop-daemon/daemon.log`, 156 KB, last modified Apr 24 12:16) is full of the same error hundreds of times:
+```
+can't open file '/Users/alancohen/pdis/laptop-daemon/daemon.py':
+[Errno 2] No such file or directory
+```
+
+**Root cause:** the Python file `~/pdis/laptop-daemon/daemon.py` that the plist points to **does not exist on disk**. At some point it was moved, renamed, or deleted — but the plist `~/Library/LaunchAgents/com.pdis.fb-daemon.plist` was never updated.
+
+**Impact:**
+- Whatever the laptop daemon was doing has NOT been running
+- PDIS on Render (`https://pdis-lsah.onrender.com`) still responds 200 OK — the web app itself is fine
+- Scheduler log (`scheduler.log`, 31 bytes) only contains `{"detail":"Method Not Allowed"}` — meaningless curl response
+
+**Open questions for `/plan`:**
+1. What was `daemon.py` supposed to do — and is that work already covered by the VM scraper + Render?
+2. If still needed, restore from git or rewrite. If not, unload and delete the plist.
+3. Same check: `com.pdis.fb-scheduler.plist` — is its target still valid?
+
+**Effort:** ~30 min investigation + fix. Not urgent if PDIS end-to-end is otherwise healthy.
+
+---
+
 ## 🛑 WAITING ON EXTERNAL INPUT
 
 ### Amit neighborhood threshold data (unblocks Amit Fit for all TLV)
