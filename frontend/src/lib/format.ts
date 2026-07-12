@@ -18,6 +18,25 @@ export function formatDateFull(iso: string): string {
   return `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth() + 1).toString().padStart(2, '0')}.${d.getFullYear()}`;
 }
 
+export interface UpdatedAgo {
+  label: string;
+  isToday: boolean;
+}
+
+/** Turns a `last_seen` date string into a recency badge: "Updated today" (green)
+ * or "Updated Nd ago" (gray). Returns null when there's no date to show. */
+export function formatUpdatedAgo(lastSeen: string | null | undefined): UpdatedAgo | null {
+  if (!lastSeen) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  const lastSeenDate = lastSeen.slice(0, 10);
+  if (lastSeenDate === today) {
+    return { label: 'Updated today', isToday: true };
+  }
+  const diffMs = new Date(today).getTime() - new Date(lastSeenDate).getTime();
+  const days = Math.max(1, Math.round(diffMs / 86400000));
+  return { label: `Updated ${days}d ago`, isToday: false };
+}
+
 export const EVENT_LABELS: Record<string, string> = {
   new_listing: "First listed",
   price_drop: "Price drop",

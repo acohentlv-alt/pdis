@@ -9,6 +9,7 @@ import structlog
 
 import pdis.database as _db
 from pdis.models import ScrapedListing, ScrapeResult
+from pdis.neighborhoods import normalize_neighborhood
 from pdis.scraper import scrape_preset
 from pdis.scraper_madlan import scrape_madlan_preset
 from pdis.config import settings
@@ -83,7 +84,15 @@ async def _upsert_properties(
         async with conn.cursor() as cur:
             for listing in listings:
                 image_urls_val = listing.image_urls if listing.image_urls else []
-                raw_data_val = json.dumps(listing.raw_data) if listing.raw_data else "{}"
+
+                normalized_neighborhood = normalize_neighborhood(listing.neighborhood)
+                raw_data_dict = dict(listing.raw_data) if listing.raw_data else {}
+                if (
+                    normalized_neighborhood != listing.neighborhood
+                    and "neighborhood_raw" not in raw_data_dict
+                ):
+                    raw_data_dict["neighborhood_raw"] = listing.neighborhood
+                raw_data_val = json.dumps(raw_data_dict) if raw_data_dict else "{}"
 
                 await cur.execute(
                     """
@@ -173,7 +182,7 @@ async def _upsert_properties(
                         "category": listing.category,
                         "address_street": listing.address_street,
                         "address_city": listing.address_city,
-                        "neighborhood": listing.neighborhood,
+                        "neighborhood": normalized_neighborhood,
                         "address_home_number": listing.address_home_number,
                         "rooms": listing.rooms,
                         "floor": listing.floor,

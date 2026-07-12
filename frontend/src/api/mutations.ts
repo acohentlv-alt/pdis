@@ -222,6 +222,30 @@ export function useSaveOperatorInput(yad2Id: string) {
   });
 }
 
+export function useUpsertLead(yad2Id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { status?: string; arm?: string }) =>
+      apiFetch(`/api/properties/${yad2Id}/lead`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['lead', yad2Id] });
+    },
+  });
+}
+
+export function useDeleteLead(yad2Id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch(`/api/properties/${yad2Id}/lead`, { method: 'DELETE' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['lead', yad2Id] });
+    },
+  });
+}
+
 export function useUpsertThresholds() {
   const qc = useQueryClient();
   return useMutation({

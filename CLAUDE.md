@@ -74,7 +74,7 @@ Token reuses `gh auth token` (scopes: `repo, gist, read:org, workflow`). If it s
 
 ### Key Components
 - **SummaryBar** — Stat cards (Scanned, Opportunities, Ratio, Price Drops, Reappeared). Clickable — filters the list.
-- **FilterBar** — Keyword search, neighborhood pills, room pills, source/sort dropdowns
+- **FilterBar** — Keyword search, room pills, source/sort dropdowns (neighborhood pills live in **FilterDrawer.tsx**, not FilterBar)
 - **PropertyCard** — Property list item with image, badges, signals, favorite star
 - **PresetManager** — CRUD modal for managing search presets (via 3-dot menu)
 - **ImageViewer** — Fullscreen lightbox with navigation
@@ -231,6 +231,7 @@ FastAPI matches routes top-to-bottom. Path parameter routes (`{preset_id}`, `{ya
 - Cross-source matching uses Haversine distance (50m same-source, 100m cross-source)
 - Hebrew text in property data is fine (comes from listings) — UI labels must be English
 - Condition keyword שמור was removed (means "maintained" = positive, not needing work)
+- Any DB CHECK/enum constraint must be mirrored as `Literal` validation in the API request model. The DB constraint is the backstop, never the validator — otherwise bad input becomes a 500. (QA finding, 2026-07-12: unvalidated `status` field on property_leads)
 
 ---
 

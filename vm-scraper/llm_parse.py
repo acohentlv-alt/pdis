@@ -41,6 +41,12 @@ Return ONLY a JSON object with these fields (null if not in text — NEVER inven
 - street_address: Hebrew street name without house number (e.g. "אבן גבירול", "דיזנגוף") or null
 - house_number: integer or null
 - neighborhood: one of these Hebrew canonical names, or null:
+  (master list lives in pdis/neighborhoods.py — CANONICAL_TLV; this copy is
+  for the Haiku system prompt since this script can't import server code.
+  Keep in sync manually if either changes. Note: bare "הצפון" is ambiguous —
+  could mean הצפון הישן or הצפון החדש — kept only so Haiku has a fallback
+  when the post doesn't specify old/new north; never used as an alias target
+  in pdis/neighborhoods.py.)
   פלורנטין, נווה צדק, כרם התימנים, לב תל אביב, הצפון הישן, הצפון החדש,
   יפו העתיקה, יפו, שפירא, שבזי, נווה אביבים, רמת אביב, תל ברוך, חובבי ציון,
   מונטיפיורי, דיזנגוף, רוטשילד, בצלאל, ביצרון, יד אליהו, הרב קוק, בבלי,

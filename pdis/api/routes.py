@@ -9,12 +9,13 @@ from datetime import datetime
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from psycopg.rows import dict_row
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Literal, Optional
 
 import structlog
 
 import pdis.database as _db
 from pdis.database import check_connection
+from pdis.arm_router import suggest_arm
 from pdis.models import ScrapedListing
 from pdis.scanner import run_scan, run_all_scans, run_scan_from_listings
 from pdis.signals import compute_signals_batch
@@ -255,7 +256,7 @@ async def custom_search(
                     p.floor, p.total_floors, p.square_meters, p.square_meter_build,
                     p.property_type, p.description, p.contact_name, p.contact_phone,
                     p.address_street, p.address_home_number, p.neighborhood, p.hood_id,
-                    p.image_urls, p.listing_url, p.days_on_market, p.first_seen,
+                    p.image_urls, p.listing_url, p.days_on_market, p.first_seen, p.last_seen,
                     p.updated_at, p.latitude, p.longitude, p.parking, p.elevator,
                     p.safe_room, p.balcony, p.pets_allowed, p.furnished,
                     p.air_conditioning, p.is_agent, p.agent_office,
@@ -395,7 +396,7 @@ async def get_preset_properties(
                     p.floor, p.total_floors, p.square_meters, p.square_meter_build,
                     p.property_type, p.description, p.contact_name, p.contact_phone,
                     p.address_street, p.address_home_number, p.neighborhood, p.hood_id,
-                    p.image_urls, p.listing_url, p.days_on_market, p.first_seen,
+                    p.image_urls, p.listing_url, p.days_on_market, p.first_seen, p.last_seen,
                     p.updated_at, p.latitude, p.longitude, p.parking, p.elevator,
                     p.safe_room, p.balcony, p.pets_allowed, p.furnished,
                     p.air_conditioning, p.is_agent, p.agent_office,
@@ -827,7 +828,7 @@ async def get_amit_fit_properties(
                     p.floor, p.total_floors, p.square_meters, p.square_meter_build,
                     p.property_type, p.description, p.contact_name, p.contact_phone,
                     p.address_street, p.address_home_number, p.neighborhood, p.hood_id,
-                    p.image_urls, p.listing_url, p.days_on_market, p.first_seen,
+                    p.image_urls, p.listing_url, p.days_on_market, p.first_seen, p.last_seen,
                     p.updated_at, p.latitude, p.longitude, p.parking, p.elevator,
                     p.safe_room, p.balcony, p.pets_allowed, p.furnished,
                     p.air_conditioning, p.is_agent, p.agent_office,
@@ -2070,6 +2071,144 @@ async def upsert_operator_input(yad2_id: str, body: OperatorInputBody):
             row = await cur.fetchone()
         await conn.commit()
     return dict(row)
+
+
+# ---------------------------------------------------------------------------
+# Property Leads (Maison Tel Aviv)
+# ---------------------------------------------------------------------------
+
+class PropertyLeadBody(BaseModel):
+    # Mirrors the DB CHECK constraints on property_leads — reject bad values
+    # with 422 here instead of letting Postgres raise CheckViolation (500).
+    status: Literal["new", "contacted", "no_answer", "dead", "converted"] | None = None
+    arm: Literal["amit", "roi", "eliyahu", "alan"] | None = None
+
+
+@router.get("/api/properties/{yad2_id}/lead")
+async def get_property_lead(yad2_id: str):
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT id FROM properties WHERE yad2_id = %s",
+                (yad2_id,),
+            )
+            prop = await cur.fetchone()
+            if not prop:
+                raise HTTPException(status_code=404, detail="Property not found")
+
+            await cur.execute(
+                """
+                SELECT status, arm, suggested_arm, suggested_reasons, created_at, updated_at
+                FROM property_leads
+                WHERE property_id = %s
+                """,
+                (prop["id"],),
+            )
+            row = await cur.fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="No lead flagged for this property")
+    return dict(row)
+
+
+@router.put("/api/properties/{yad2_id}/lead")
+async def upsert_property_lead(yad2_id: str, body: PropertyLeadBody):
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            # Gather everything suggest_arm needs: the property row (category,
+            # is_agent, raw_data.fb_intent), the latest signal_details
+            # (buyer_fit_tags, condition_keywords_found — these live on
+            # property_classifications, NOT on properties), and operator input
+            # (condition).
+            await cur.execute(
+                """
+                SELECT p.id, p.category, p.is_agent, p.raw_data,
+                       pc.signal_details,
+                       oi.condition AS operator_condition
+                FROM properties p
+                LEFT JOIN property_classifications pc ON pc.property_id = p.id
+                LEFT JOIN property_operator_input oi ON oi.property_id = p.id
+                WHERE p.yad2_id = %s
+                """,
+                (yad2_id,),
+            )
+            prop = await cur.fetchone()
+            if not prop:
+                raise HTTPException(status_code=404, detail="Property not found")
+
+            await cur.execute(
+                "SELECT id FROM property_leads WHERE property_id = %s",
+                (prop["id"],),
+            )
+            existing = await cur.fetchone()
+
+            if existing:
+                # UPDATE only the fields provided — keep suggested_arm/reasons as-is.
+                await cur.execute(
+                    """
+                    UPDATE property_leads
+                    SET status = COALESCE(%(status)s, status),
+                        arm = COALESCE(%(arm)s, arm),
+                        updated_at = NOW()
+                    WHERE property_id = %(property_id)s
+                    RETURNING status, arm, suggested_arm, suggested_reasons, created_at, updated_at
+                    """,
+                    {
+                        "status": body.status,
+                        "arm": body.arm,
+                        "property_id": prop["id"],
+                    },
+                )
+            else:
+                suggested_arm, reasons = suggest_arm(
+                    {
+                        "category": prop["category"],
+                        "is_agent": prop["is_agent"],
+                        "raw_data": prop["raw_data"] or {},
+                    },
+                    prop["signal_details"] or {},
+                    {"condition": prop["operator_condition"]},
+                )
+                await cur.execute(
+                    """
+                    INSERT INTO property_leads
+                        (property_id, status, arm, suggested_arm, suggested_reasons, updated_at)
+                    VALUES (%(property_id)s, COALESCE(%(status)s, 'new'), %(arm)s,
+                            %(suggested_arm)s, %(suggested_reasons)s::jsonb, NOW())
+                    RETURNING status, arm, suggested_arm, suggested_reasons, created_at, updated_at
+                    """,
+                    {
+                        "property_id": prop["id"],
+                        "status": body.status,
+                        "arm": body.arm,
+                        "suggested_arm": suggested_arm,
+                        "suggested_reasons": json.dumps(reasons),
+                    },
+                )
+
+            row = await cur.fetchone()
+        await conn.commit()
+    return dict(row)
+
+
+@router.delete("/api/properties/{yad2_id}/lead")
+async def delete_property_lead(yad2_id: str):
+    async with _db.pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT id FROM properties WHERE yad2_id = %s",
+                (yad2_id,),
+            )
+            prop = await cur.fetchone()
+            if not prop:
+                raise HTTPException(status_code=404, detail="Property not found")
+
+            await cur.execute(
+                "DELETE FROM property_leads WHERE property_id = %s",
+                (prop["id"],),
+            )
+        await conn.commit()
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------

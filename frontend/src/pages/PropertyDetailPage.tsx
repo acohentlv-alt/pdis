@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useProperty, useSignals, useEvents, useOperatorInput, useMatches, useClosedComps } from '../api/queries';
-import { useWhitelist, useRemoveWhitelist, useBlacklist, useRemoveBlacklist, useAddFavorite, useRemoveFavorite } from '../api/mutations';
-import { formatPrice, formatPricePerSqm, formatDate, formatDateFull, SIGNAL_LABELS } from '../lib/format';
+import { useProperty, useSignals, useEvents, useOperatorInput, useMatches, useClosedComps, useLead } from '../api/queries';
+import { useWhitelist, useRemoveWhitelist, useBlacklist, useRemoveBlacklist, useAddFavorite, useRemoveFavorite, useUpsertLead, useDeleteLead } from '../api/mutations';
+import { formatPrice, formatPricePerSqm, formatDate, formatDateFull, formatUpdatedAgo, SIGNAL_LABELS } from '../lib/format';
+import { sourceUrl as buildSourceUrl } from '../lib/sourceUrl';
 import LifecycleTimeline from '../components/LifecycleTimeline';
 import ImageViewer from '../components/ImageViewer';
 import OperatorInputForm from '../components/OperatorInputForm';
@@ -34,6 +35,14 @@ function SignalRow({ label, active, extra }: SignalRowProps) {
   );
 }
 
+const LEAD_STATUSES: { value: string; label: string }[] = [
+  { value: 'new', label: 'New' },
+  { value: 'contacted', label: 'Contacted' },
+  { value: 'no_answer', label: 'No answer' },
+  { value: 'dead', label: 'Dead' },
+  { value: 'converted', label: 'Converted' },
+];
+
 function highlightKeywords(text: string, keywords: string[]): React.ReactNode {
   if (!keywords.length) return text;
   const escaped = keywords.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
@@ -56,6 +65,7 @@ export default function PropertyDetailPage() {
   useOperatorInput(yad2Id);
   const { data: matchesData } = useMatches(yad2Id);
   const { data: compsData } = useClosedComps(yad2Id);
+  const { data: leadData } = useLead(yad2Id);
 
   const whitelist = useWhitelist();
   const removeWhitelist = useRemoveWhitelist();
@@ -63,6 +73,8 @@ export default function PropertyDetailPage() {
   const removeBlacklist = useRemoveBlacklist();
   const addFav = useAddFavorite();
   const removeFav = useRemoveFavorite();
+  const upsertLead = useUpsertLead(yad2Id!);
+  const deleteLead = useDeleteLead(yad2Id!);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerStartIndex, setViewerStartIndex] = useState(0);
 
@@ -80,6 +92,7 @@ export default function PropertyDetailPage() {
   const price = prop.price as number | null;
   const sqm = prop.display_sqm as number | null;
   const dom = (prop.days_on_market as number) ?? 0;
+  const updatedAgo = formatUpdatedAgo(prop.last_seen as string | null | undefined);
 
   // Signal details — support both new tier-based and old shapes
   const strongSignals = (sd.strong_signals as string[]) ?? [];
@@ -130,17 +143,19 @@ export default function PropertyDetailPage() {
   const imageUrls = (prop.image_urls as string[] | null) ?? [];
   const yad2DateAdded = prop.yad2_date_added as string | null;
 
+  const lead = (leadData as Record<string, unknown> | null) ?? null;
+  const leadSuggestedArm = (lead?.suggested_arm as string | null) ?? null;
+  const leadSuggestedReasons = Array.isArray(lead?.suggested_reasons)
+    ? (lead!.suggested_reasons as string[])
+    : [];
+
   const isAgent = !!(prop.is_agent);
   const agentOffice = prop.agent_office as string | null;
   const moveInDate = prop.move_in_date as string | null;
   const source = (prop.source as string) ?? 'yad2';
 
   // Build source URL: use listing_url if available, otherwise construct from yad2_id
-  const sourceUrl = (prop.listing_url as string) || (
-    source === 'yad2' ? `https://www.yad2.co.il/item/${yad2Id}` :
-    source === 'madlan' ? `https://www.madlan.co.il/listings/${(yad2Id ?? '').replace('madlan_', '')}` :
-    null
-  );
+  const sourceUrl = buildSourceUrl(prop.listing_url as string | null, source, yad2Id ?? null);
 
   const amenities = [
     { key: 'parking', label: 'Parking', active: !!(prop.parking) },
@@ -212,6 +227,11 @@ export default function PropertyDetailPage() {
             <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">
               {source === 'yad2' ? 'Yad2' : source}
             </span>
+            {updatedAgo && (
+              <span className={`text-xs px-2 py-0.5 rounded-full ${updatedAgo.isToday ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                {updatedAgo.label}
+              </span>
+            )}
           </div>
         </div>
         <div className="text-2xl font-bold text-gray-900">{formatPrice(price)}</div>
@@ -567,13 +587,63 @@ export default function PropertyDetailPage() {
             {isBlacklisted ? '✗ Blacklisted' : 'Blacklist'}
           </button>
         </div>
-        {sourceUrl && (
+
+        {/* Maison Tel Aviv lead flagging */}
+        {!lead ? (
           <button
-            onClick={() => window.open(sourceUrl, '_blank')}
-            className="w-full min-h-[44px] bg-gray-900 text-white rounded-lg text-sm font-medium"
+            onClick={() => upsertLead.mutate({})}
+            disabled={upsertLead.isPending}
+            className="w-full min-h-[44px] rounded-lg text-sm font-medium border border-purple-300 bg-purple-50 text-purple-700 disabled:opacity-50"
           >
-            View on {source === 'madlan' ? 'Madlan' : 'Yad2'} →
+            🏠 Flag as Maison lead
           </button>
+        ) : (
+          <div className="border border-purple-200 bg-purple-50/60 rounded-lg p-3 space-y-2">
+            <div className="flex flex-wrap gap-1.5">
+              {LEAD_STATUSES.map((s) => (
+                <button
+                  key={s.value}
+                  onClick={() => upsertLead.mutate({ status: s.value })}
+                  disabled={upsertLead.isPending}
+                  className={`text-xs px-2 py-1 rounded-full border transition-colors disabled:opacity-50 ${
+                    lead.status === s.value
+                      ? 'bg-purple-600 border-purple-600 text-white'
+                      : 'bg-white border-gray-300 text-gray-600'
+                  }`}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+            {leadSuggestedArm && (
+              <div className="text-xs text-gray-600">
+                Suggested: <span className="font-medium capitalize">{leadSuggestedArm}</span>
+                {leadSuggestedReasons.length > 0 ? ` — ${leadSuggestedReasons.join(', ')}` : ''}
+              </div>
+            )}
+            <button
+              onClick={() => deleteLead.mutate()}
+              disabled={deleteLead.isPending}
+              className="text-xs text-red-600 underline disabled:opacity-50"
+            >
+              Unflag
+            </button>
+          </div>
+        )}
+
+        {sourceUrl && (
+          <>
+            <button
+              onClick={() => window.open(sourceUrl, '_blank')}
+              className="w-full min-h-[44px] bg-gray-900 text-white rounded-lg text-sm font-medium"
+            >
+              View on {source === 'madlan' ? 'Madlan' : source === 'facebook' ? 'Facebook' : 'Yad2'} →
+            </button>
+            <p className="text-xs text-gray-400 text-center">
+              PDIS links to publicly available listings. Details are read automatically from the
+              source and may be outdated — always verify at the source.
+            </p>
+          </>
         )}
       </div>
     </div>

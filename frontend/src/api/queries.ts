@@ -41,6 +41,25 @@ export function useOperatorInput(yad2Id: string | undefined) {
   });
 }
 
+export function useLead(yad2Id: string | undefined) {
+  return useQuery({
+    queryKey: ['lead', yad2Id],
+    queryFn: async () => {
+      try {
+        return await apiFetch<Record<string, unknown>>(`/api/properties/${yad2Id}/lead`);
+      } catch (err) {
+        // 404 = "no lead flagged yet", the expected common case — not an error.
+        if (err instanceof Error && err.message === 'No lead flagged for this property') {
+          return null;
+        }
+        throw err;
+      }
+    },
+    enabled: !!yad2Id,
+    retry: false,
+  });
+}
+
 export function useMatches(yad2Id: string | undefined) {
   return useQuery({
     queryKey: ['matches', yad2Id],

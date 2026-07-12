@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { formatPrice, formatPricePerSqm } from '../lib/format';
+import { formatPrice, formatPricePerSqm, formatUpdatedAgo } from '../lib/format';
+import { sourceUrl as buildSourceUrl } from '../lib/sourceUrl';
 import { logEvent } from '../lib/telemetry';
 import ImageViewer from './ImageViewer';
 
@@ -38,6 +39,7 @@ export default function PropertyCard({
   const sqm = item.display_sqm as number | null;
   const dom = (item.days_on_market as number) ?? 0;
   const neighborhood = item.neighborhood as string | null;
+  const updatedAgo = formatUpdatedAgo(item.last_seen as string | null | undefined);
 
   const rooms = item.rooms as number | null;
   const floor = item.floor as number | null;
@@ -68,11 +70,7 @@ export default function PropertyCard({
   const matchedSources = (item.matched_sources as string[] | null) ?? [];
   const allSources = new Set([source, ...matchedSources]);
 
-  const sourceUrl = (item.listing_url as string) || (
-    source === 'yad2' ? `https://www.yad2.co.il/item/${yad2Id}` :
-    source === 'madlan' ? `https://www.madlan.co.il/listings/${yad2Id.replace('madlan_', '')}` :
-    null
-  );
+  const sourceUrl = buildSourceUrl(item.listing_url as string | null, source, yad2Id);
 
   const isFav = favoriteIds?.has(yad2Id) ?? false;
 
@@ -153,6 +151,11 @@ export default function PropertyCard({
         )}
         <div className="flex flex-wrap items-center gap-1">
           {dom > 0 && <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{String(dom)}d</span>}
+          {updatedAgo && (
+            <span className={`text-xs px-2 py-0.5 rounded-full ${updatedAgo.isToday ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+              {updatedAgo.label}
+            </span>
+          )}
           {isNew && <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium">New</span>}
           {isAgent && <span className="text-xs bg-purple-50 text-purple-600 px-2 py-0.5 rounded-full">Agent</span>}
           {priceDrop && <span className="text-xs bg-red-50 text-red-600 px-2 py-0.5 rounded-full cursor-help" title={priceDropTitle}>Price drop</span>}

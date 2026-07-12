@@ -8,6 +8,7 @@ from psycopg_pool import AsyncConnectionPool
 from psycopg.rows import dict_row
 
 from pdis.config import settings
+from pdis.neighborhoods import ALIASES
 
 logger = structlog.get_logger(__name__)
 
@@ -592,6 +593,41 @@ async def run_migrations() -> None:
                    AND (sp.extra_params->'fb_groups' IS NULL
                         OR sp.extra_params->'fb_groups' = '[]'::jsonb)
             """)
+
+            # Neighborhood alias backfill — one-shot, idempotent (re-running is a
+            # no-op once neighborhood already equals the canonical value).
+            # Preserves the original variant in raw_data.neighborhood_raw before
+            # overwriting neighborhood, matching the write-path behavior in
+            # scanner.py::_upsert_properties.
+            for alias, canon in ALIASES.items():
+                await cur.execute(
+                    """
+                    UPDATE properties
+                    SET raw_data = COALESCE(raw_data, '{}'::jsonb)
+                                   || jsonb_build_object('neighborhood_raw', neighborhood),
+                        neighborhood = %(canon)s
+                    WHERE neighborhood = %(alias)s
+                    """,
+                    {"canon": canon, "alias": alias},
+                )
+
+            # property_leads — Maison Tel Aviv lead-tracking (Exec B routes leads here)
+            await cur.execute("""
+                CREATE TABLE IF NOT EXISTS property_leads (
+                    id              SERIAL PRIMARY KEY,
+                    property_id     INTEGER NOT NULL UNIQUE REFERENCES properties(id),
+                    status          TEXT NOT NULL DEFAULT 'new'
+                                      CHECK (status IN ('new','contacted','no_answer','dead','converted')),
+                    arm             TEXT CHECK (arm IN ('amit','roi','eliyahu','alan')),
+                    suggested_arm   TEXT,
+                    suggested_reasons JSONB DEFAULT '[]',
+                    created_at      TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at      TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            await cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_property_leads_status ON property_leads(status)"
+            )
 
         await conn.commit()
     logger.info("db.migrations_done")
