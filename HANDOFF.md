@@ -1,45 +1,34 @@
-# HANDOFF — April 25, 2026
+# HANDOFF — July 13, 2026
 
 ## What we did today
 
-Short session. Confirmed yesterday's Madlan→VM migration is fully working, then started the next cleanup target (`pdis/scraper.py` removal) — planner returned findings that materially changed the scope. Session ended before the brief was finalized.
+**Exec A (PDIS Phase 1) shipped end-to-end — the first code on main since April 25, and the first brick of the PDIS→Maison lead-gen pivot.** Recovered the July 7 brief from its session transcript, ran the full loop (review REVISE → 7 findings fixed → exec in verified isolated worktree → QA 19/20 on a disposable Neon branch → L5 fix re-proven → smoke test), and pushed as `6160c58`. Also committed the long-orphaned April 25 session docs (`a16d7ed`).
+
+What shipped: canonical neighborhood taxonomy (817→794 distinct spellings, originals preserved in `raw_data.neighborhood_raw`), "Updated Xd ago" recency badge, shared source-link builder + "View on Facebook" label fix + verify-at-source disclaimer, `property_leads` table + lead endpoints + "Flag as Maison lead" UI, and `pdis/arm_router.py` (R1–R4: wreck→Roi, Amit-fit→Amit, other-forsale→Eliyahu, rent→Alan).
 
 ## What's half-done
 
-**`pdis/scraper.py` removal — planner findings landed, brief not yet drafted.** Two surprises:
-
-1. **`fetch_item_detail` is NOT dead.** HANDOFF/TASKS have been repeating this for days and it's wrong. It's called by `_backfill_built_sqm` at `pdis/scanner.py:388`, which runs in the live VM-ingest path (`run_scan_from_listings`). It backfills `square_meter_build` + `description` on every VM-ingested Yad2 listing. `square_meter_build` feeds the `below_avg_price` strong signal (`pdis/signals.py:121,124,133,136,299`). If we delete it, we silently degrade that signal.
-
-2. **VM-skip branch in scanner.py only covers `forsale`, not `rent`.** `pdis/scanner.py:603-619` gates on `category=="forsale"`. Yad2 **rent** presets fall through to `scrape_preset(...)` at line 645. CLAUDE.md says rent has run on VM since Apr 19, but the Render code never caught up — it's been surviving because the scheduled trigger is gone, but any manual "Run scan" on a rent preset would crash once we delete the fallback.
-
-**Alan decided:** Option A (reduce `scraper.py` to just `fetch_item_detail`, delete everything else, broaden VM-skip to cover rent, fix the stale TASKS/HANDOFF claim).
-
-**Planner agent still alive — ID `ae4cae76caf87f99e`.** Next session: `SendMessage` to continue, ask for the full brief with Alan's A/yes/yes decisions baked in. Then `/review` → `/exec` → `/qa`.
+- **Exec B (Phase 3) is fully specified and decision-complete, not started.** Hidden `/leads` page, leads/suggestions endpoints, turf filter. See "NEXT UP" in TASKS.md — launches on Alan's "exec b".
+- Alan never named his own additions to the starter Maison turf list (8 hoods are live in `pdis/neighborhoods.py::MAISON_TURF`).
 
 ## What to do next
 
-1. **First thing: resume planner `ae4cae76caf87f99e`** to draft the full brief for scraper.py Option A. Then `/review` → `/exec` → `/qa`.
-2. **Laptop daemon exec** — brief is ready in TASKS.md, zero code changes, ~10 min. Alan can run the 3 shell commands himself. Handles a real `shechter` credential exposure on disk.
-3. **If scraper.py ships fast:** next cleanup is `search_presets.is_active` column drop (target was Apr 24, now a day late).
+1. Alan says **"exec b"** → implement Phase 3 from the 07-07 brief (decisions all locked; fold in the FB group_url-fallback fix).
+2. Same QA pattern as today: create a Neon branch (`NEON_API_KEY` now in `~/pdis/.env`), QA there, delete after.
 
 ## Watch out for
 
-- **Do NOT delete `fetch_item_detail` as part of scraper.py cleanup.** The old HANDOFFs were wrong. This is the main gotcha for the next session.
-- **Broaden VM-skip to rent in the same brief** as the fallback deletion — required for correctness. Without it, manual "Run scan" on yad2 rent presets crashes.
-- **TASKS_2026-04-25.md is today's archive** (Apr 24 evening + Apr 25 morning work). TASKS_2026-04-24.md does NOT exist — the Apr 24 evening work went into the Apr 23 TASKS file (which was renamed to `TASKS_2026-04-25.md` at end-session).
-- **cron-job.org Madlan job:** confirmed neutralized. Schedule expired Apr 15 (already past). No action needed.
-- **Oracle VM reply to Alan's question:** PDIS stays on Render because Oracle Always Free has idle-reclaim risk, requires hand-rolling HTTPS/deploy/systemd, and the VM IP is tainted for Yad2 egress. See TASKS.md "PARKED — Consolidate on Oracle VM" for the full rationale.
+- **PDIS is still FROZEN.** `6160c58` is on main but NOT deployed (Render suspended). The neighborhood backfill + `property_leads` migration will fire on prod automatically at unfreeze — that's intended and idempotent, but whoever unfreezes should expect it and run the AWAITING QA prod checks in TASKS.md.
+- **Never start a local server with `.env`'s prod DATABASE_URL** — startup runs migrations. Use a Neon branch (that's what the API key is for).
+- **Sweep for stale processes before QA** — an interrupted QA agent left a live uvicorn on the branch mid-session (now a memory rule).
+- Amit is now a routed-to PARTNER, not the client — leads UI stays behind an unlinked route (Alan's decision 2b); nothing in his daily views changed except the recency badge.
+- Alan's open micro-decision: whether bare `הצפון` stays a valid canonical hood (TASKS anchor).
 
 ## Test these
 
-- [ ] Madlan VM next fire: Sat Apr 25 06:03 IDT — already confirmed working, but worth a peek Sunday morning.
-- [ ] Nothing else — no code shipped this session.
+- Everything shipped today was QA'd (19/20 + re-verified fix) and smoke-tested on the branch DB — but **only on the branch**. Prod verification (817→~794 hoods, signal counts stable) can only happen at unfreeze.
+- Alan has not yet eyeballed the live UI himself — the QA screenshots are in the 07-12 session scratchpad if wanted; or spin up a fresh Neon branch + local server for a hands-on look.
 
 ---
 
-*Archived sessions:*
-- *HANDOFF_2026-04-23.md — Apr 23 late-night Madlan→VM migration + stale-conn fix (shipped, confirmed working Apr 24).*
-- *HANDOFF_2026-04-19.md — Apr 18-19 late-night Yad2 rent→VM + phone-hook fix.*
-- *HANDOFF_2026-04-18_evening.md — Apr 18 evening Madlan latency fix.*
-- *HANDOFF_2026-04-18_morning.md — Apr 17-18 day→evening pool fix + telemetry.*
-- *HANDOFF_2026-04-17.md — Apr 17 is_active split session.*
+*Archived: HANDOFF_2026-04-25.md (evening, competitor investigation) · HANDOFF_2026-04-25_morning.md (morning, scraper.py findings) · HANDOFF_2026-04-23.md and earlier.*

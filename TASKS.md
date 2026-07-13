@@ -1,121 +1,69 @@
 # PDIS — Task List
-*July 8, 2026 (fresh — carried forward from `TASKS_2026-07-07.md`)*
+*July 13, 2026 (fresh — carried forward from `TASKS_2026-07-12.md`)*
 
-> **⚠️ PROJECT STATUS: FROZEN (since June 2026).** PDIS was intentionally wound down to $0: VM scrapers off, Render suspended, Neon on Free tier. Nothing runs automatically. Any task below that touches the VM, Render deploys, or live scans is dormant until Alan decides to unfreeze.
+> **⚠️ PROJECT STATUS: FROZEN (since June 2026).** VM scrapers off, Render suspended, Neon Free. Nothing runs automatically — intentional. **Exec A (commit `6160c58`) is on main but NOT deployed; its neighborhood migration runs on prod automatically at unfreeze.**
 
 ---
 
 ## 📌 SESSION ANCHORS (auto-collected)
-- **2026-07-07** [plan] PropertyDetailPage.tsx:575 "View on" button mislabels Facebook listings as "Yad2" (folded into Exec A) [L1]
-- **2026-07-07** [plan] ~/pdis/CLAUDE.md:77 stale — neighborhood pills live in FilterDrawer.tsx:220-236, not FilterBar (doc fix inside Exec A) [L1]
-- **2026-07-07** [plan] DB has non-TLV cities (Haifa: הדר הכרמל, אחוזה, קרית חיים) — new neighborhood taxonomy is TLV-only by design; Haifa alias map is a future follow-up if Haifa Buy preset gets real use [L2]
-- **2026-07-07** [plan] vm-scraper/llm_parse.py canonical hood list will be duplicated by new pdis/neighborhoods.py — true single-sourcing needs a VM deploy (dormant while frozen); fold a sync note into that deploy [L1]
-- **2026-07-07** [plan] property_leads has no created_by/actor field — fine while app is single-user shared; revisit if partners get their own logins [L2]
+- **2026-07-08** [review] Bare `הצפון` ("North") is a standalone canonical entry in llm_parse.py:47, ambiguous vs הצפון הישן/החדש — Alan to decide whether it stays a valid canonical (open decision #4 from 07-12; revisit if it pollutes the Leads view) [L2]
 
 ---
 
-## 🚧 IN PROGRESS
+## 🔜 NEXT UP — Exec B (Phase 3: Maison lead routing UI) [L3]
+**Ready to launch on Alan's "exec b".** All product decisions locked (07-08: hidden unlinked `/leads` route, status enum, R1–R4 rules, agents included, starter turf list in `pdis/neighborhoods.py::MAISON_TURF`). Scope per the reviewed 07-07 brief:
+- `GET /api/leads?status=&arm=&turf=` + `GET /api/leads/suggestions` (register literal routes BEFORE any future `/api/leads/{param}`; do NOT filter `is_active` — delisted = hottest lead)
+- `frontend/src/pages/LeadsPage.tsx` + route in App.tsx (unlinked — no NavBar tab per decision 2b), LeadCard (contact reveal, arm badge, status chips), "Maison turf" toggle
+- **Fold in:** FB posts with only `group_url` (no `listing_url`) currently render NO "View on" button — add group_url fallback (QA anchor 07-08)
+- **Open for Alan:** additions to the starter turf list ("+ Alan's areas" never named)
 
-### PDIS → Maison lead-gen — Phase 1 + Phase 3 (planned 2026-07-07, Fable) [L3]
-**Big picture (Alan, 2026-07-07):** PDIS becomes Alan's lead engine feeding Maison TLV; Amit is now a PARTNER it routes leads to, not "the client". See memory `project_pdis_maison_leadgen_direction`. Build-now, deploy-after-unfreeze (PDIS is FROZEN).
-**Scope PLANNED but NOT yet reviewed/execed** — brief lives in the 2026-07-07 transcript; NO code landed (no `pdis/neighborhoods.py`, no `property_leads`). Lane **L3** (planner confirmed — neighborhood rewrite feeds `below_avg_price` signal grouping `signals.py:119-142`, Amit-Fit lookup `signals.py:186`, dedup matcher `matching.py:198`). Split into two staged execs:
-- **Exec A (Phase 1):** neighborhood canonical taxonomy (817 spelling variants → ~40 real hoods, `pdis/neighborhoods.py` NEW + normalize at `scanner.py:176` + idempotent backfill in `database.py`), "Updated Xd ago" recency badge, verify-at-source disclaimer + FB label fix (`PropertyDetailPage.tsx:575`), one-tap lead status (`property_leads` table).
-- **Exec B (Phase 3):** arm-router (`pdis/arm_router.py` NEW — wreck→Roi, fits-Amit-price→Amit, else-forsale→Eliyahu, rent→Alan), Leads view (`/leads` + LeadsPage), Maison-turf geo filter, outreach-STATUS only (NO automated contacting — that's deferred Phase 4).
-- **OUT:** Phase 2 (dangerous-buildings GIS ingestion), Phase 4 (automated outreach), any paid source. $0.
-
-**✅ ANSWERED (Alan, 2026-07-08 — "go", all recommendations accepted):**
-1. (a) new `/leads` tab, Amit's views untouched.
-2. (b) hidden behind unlinked route — partners backstage.
-3. Status enum `new/contacted/no_answer/dead/converted` — yes.
-4. Merge "הצפון הישן - צפון/דרום" into one "הצפון הישן", sub-area kept in `raw_data.neighborhood_raw` — yes.
-5. Routing rules R1–R4 as v1, tunable — yes.
-6. Agent-listed properties: include (route + note).
-7. Maison turf list — starter as proposed: הצפון הישן, הצפון החדש, בבלי, כוכב הצפון, אזורי חן, נווה אביבים, רמת אביב, תל ברוך (Alan can edit anytime).
-8. Staging — yes: Exec A now, Exec B after A ships.
-
-**Next step:** recover Exec A brief from the 2026-07-07 transcript → `/review` (L3, mandatory) → Alan approves → `/exec`. Direction memory written: `project_pdis_maison_leadgen_direction.md` (2026-07-08).
+## 🚧 IN PROGRESS (stalled)
 
 ### Yad2-on-Render fallback removal (brief drafting — stalled since Apr 25) [L2]
-Planner findings (Apr 25) that changed scope:
-1. **`fetch_item_detail` is NOT dead.** Called by `_backfill_built_sqm` at `pdis/scanner.py:388` (live VM-ingest path). Feeds `square_meter_build` → `below_avg_price` strong signal (`pdis/signals.py:121,124,133,136,299`).
-2. **VM-skip branch only covers `forsale`, not `rent`.** `pdis/scanner.py:603-619`; rent falls through to `scrape_preset(...)` at line 645.
-
-**Alan picked Option A + yes + yes:** keep only `fetch_item_detail` in scraper.py; delete `scrape_preset`, `_parse_listing`, `_build_params`, `_is_blocked`, HEADERS consumers; delete the `else: scrape_preset(...)` branch; broaden VM-skip to cover rent; fix stale docs claim.
-Env cleanup in same pass: drop `scrape_delay_min/max`, `scrape_page_delay_min/max` (unused); keep `scrape_max_pages` (madlan) + `scrape_request_timeout` (yad2_phone).
-*The Apr 25 planner agent is long gone — resume needs a fresh `/plan` seeded with the findings above.*
+Findings (verified Apr 25): `fetch_item_detail` is NOT dead (called by `_backfill_built_sqm`, `pdis/scanner.py:388`, feeds `below_avg_price`); VM-skip branch covers only `forsale` (`scanner.py:603-619`), rent falls through to `scrape_preset` at :645. **Alan picked Option A:** reduce scraper.py to `fetch_item_detail` only, delete the rest, broaden VM-skip to rent, fix stale docs. Env cleanup: drop `scrape_delay_*`/`scrape_page_delay_*`; keep `scrape_max_pages`, `scrape_request_timeout`. Needs fresh `/plan` seeded with these findings.
 
 ---
 
 ## 🛑 WAITING ON EXTERNAL INPUT (dormant while frozen)
-
-### Amit neighborhood threshold data (unblocks Amit Fit for all TLV)
-Only פלורנטין has rows in `neighborhood_thresholds`. Need per-neighborhood, per-size-bucket values for `target_price_per_sqm_preferred` + `target_price_per_sqm_max`. Admin UI at `pdis/api/routes.py:2074-2352` supports CRUD with auto-recompute.
-
-### New Facebook groups (including building-for-sale)
-Code ready (5-intent Haiku prompt shipped PR #2), VM deploy pending group additions. Also blocked on the FB scraper restart decision (Path A self-host vs Apify top-up — see `TASKS_2026-04-25.md`), and now on unfreeze.
-
----
+- **Amit neighborhood threshold data** — only פלורנטין has `neighborhood_thresholds` rows; need per-hood per-size-bucket targets. Admin UI: `pdis/api/routes.py:2074-2352`. NOTE: post-Exec A, load thresholds under CANONICAL hood names (`pdis/neighborhoods.py`).
+- **New Facebook groups** — code ready (PR #2), VM deploy pending; also gated on FB restart decision (Path A self-host vs Apify top-up, see `TASKS_2026-04-25.md`) + unfreeze.
 
 ## 🚨 DEPLOY PENDING (dormant while frozen — VM is off)
-
-- **VM deploy for PR #2** (Haiku 5-intent + net/balcony sqm) — deploy commands in `TASKS_2026-07-07.md:94-107`.
+- **VM deploy for PR #2** (Haiku 5-intent + net/balcony sqm) — commands in `TASKS_2026-07-07.md:94-107`. **Add to same deploy:** sync `vm-scraper/llm_parse.py` canonical hood list with `pdis/neighborhoods.py` (single-sourcing note added 07-07; llm_parse.py now carries a master-pointer comment from Exec A).
 - **Historical FB price sweep** (`scripts/fb_price_sweep_20260418.py`) — after VM deploy + one clean scrape.
-- **Madlan field probe** (`scripts/madlan_field_probe.py`) — standalone read-only, can run anytime for a follow-up micro-brief.
+- **Madlan field probe** (`scripts/madlan_field_probe.py`) — read-only, anytime.
 
----
+## 🔄 FOLLOW-UPS — stale-conn risk in other loops
+- `pdis/scanner.py:_upsert_properties` per-row loop (Neon 5-min idle-kill); apply `executemany` pattern from classification.py fix. Needs `/plan`.
+- `pdis/scanner.py:_create_snapshots` ~2400 round-trips / 1194 rows.
+- `pdis/matching.py:backfill_year_built_from_buildings` (~:754) per-property loop.
 
-## 🔄 FOLLOW-UPS — same stale-conn risk in other loops
-- `pdis/scanner.py:_upsert_properties` — per-row loop, close to Neon's 5-min idle-kill window. Apply `executemany` pattern from the classification.py fix. Needs `/plan`.
-- `pdis/scanner.py:_create_snapshots` — ~2400 round-trips on 1194 rows.
-- `pdis/matching.py:backfill_year_built_from_buildings` (~line 754) — per-property SELECT + UPDATE loop.
-
----
-
-## AWAITING QA / VERIFICATION (all passive; most unverifiable while frozen)
-- PR #3 Render deploy check (`/api/debug/recent-errors` → SPA 200 with html body) — Render suspended, unverifiable until unfreeze.
-- PR #2 Amit Fit recount — still gated by threshold data.
-- `scan_enabled` / `is_visible` split — iPhone test never done.
-- Telemetry v1, fire-and-forget ingest, low-volume guard, DB-backed scan lock, events.py N+1 — passive.
-
----
+## AWAITING QA / VERIFICATION
+- **Exec A migration on PROD** — runs at unfreeze; verify then: distinct hoods 817→~794, `neighborhood_raw` ~1300 rows, signal counts stable (QA-proven on branch 07-12, prod pending).
+- PR #3 Render deploy check — unverifiable until unfreeze.
+- `scan_enabled`/`is_visible` split — iPhone test never done.
+- Telemetry v1, fire-and-forget ingest, low-volume guard, DB scan lock, events.py N+1 — passive.
 
 ## NOT STARTED
-
 ### 🧹 Stale code cleanup
 - Drop `search_presets.is_active` column.
-- Payload bloat in `/api/favorites`, `/api/whitelist`, `/api/blacklist` (`pdis/api/routes.py:1709, 1731, 1870`) — `SELECT p.*` pattern.
-
+- Payload bloat: `SELECT p.*` in `/api/favorites`, `/api/whitelist`, `/api/blacklist` (`routes.py:1729, 1751, 1890`).
+### Small follow-ups (from 07-07 anchors)
+- Haifa neighborhood alias map — only if Haifa Buy preset gets real use.
+- `property_leads.created_by` actor field — only if partners get their own logins.
 ### From prior sessions
-- Log path configurability for `vm-scraper/trigger_server.py` (hardcoded `/var/log/`).
-- Error toast for "Run Yad2 now" button.
-- Amit Fit category filter — verify honored.
-- Flip `YAD2_PHONE_FETCH_ENABLED=true` on Render.
-- Govmap full backfill (tmux on VM, long-running).
-- Custom Search pill.
-- Mystery error, double page_view on redirect, QA `ui_events` cleanup.
-
+- `vm-scraper/trigger_server.py` log path configurability · error toast for "Run Yad2 now" · verify Amit Fit category filter · flip `YAD2_PHONE_FETCH_ENABLED` on Render · Govmap full backfill · Custom Search pill · mystery error / double page_view / `ui_events` cleanup.
 ### 🧭 Strategic bets
-2. "Since yesterday" daily feed (1-2d) · 3. Push notifications PWA (2-3d) · 4. Phone reveals North Star (needs ~30d telemetry) · 5. Signals as narrative (0.5d) · 6. Ingest health dot (0.5d) · 7. Tests on signals/matching/events (3d)
-
-### 🆕 Strategic vision — Golden Sources + Profit Floor
-- **Tier 1 — Profit Floor** (days) — reverse-engineered pricing headline on PropertyCard.
-- **Tier 2 — The Vault / Golden Sources** (weeks) — Maya/Rashumot/insolvency.gov.il, needs feasibility spike.
-- **Tier 3 — Ultra-Distress cross-referencing** (BLOCKED on TABU paid access).
-
----
+"Since yesterday" feed (1-2d) · Push notifications PWA (2-3d) · Phone reveals North Star (~30d telemetry) · Signals as narrative (0.5d) · Ingest health dot (0.5d) · Tests on signals/matching/events (3d)
+### 🆕 Golden Sources + Profit Floor
+Tier 1 Profit Floor (days) · Tier 2 Vault/Golden Sources (weeks, feasibility spike) · Tier 3 Ultra-Distress (BLOCKED on TABU).
 
 ## PARKED
-- **FB Marketplace integration** — revisit if Groups volume insufficient AND FB pipeline revived.
-- **💰 Consolidate on Oracle VM — kill Render** — partially overtaken by events: Render is now suspended (freeze), so the cost question is moot until unfreeze.
-- **🏠 Buyer-sourcing feature** (idea from Maison, 2026-06-24) — "buyer brief in → ranked shortlist out", reusing Yad2/Madlan scrapers. Scope only after Maison validates the manual flow.
+- FB Marketplace · Consolidate on Oracle VM (moot while Render suspended) · Buyer-sourcing feature (scope after Maison validates manual flow; partially realized by the lead-gen pivot).
 
 ---
 
 *Archived sessions:*
-- *TASKS_2026-07-07.md — Apr 25 list + July 7 planning anchors (Exec A: neighborhood taxonomy + property_leads).*
-- *TASKS_2026-04-25.md — Apr 24 evening laptop-daemon plan/review + Apr 25 Madlan confirmation + scraper.py plan findings.*
-- *TASKS_2026-04-23.md — Apr 23 stale-code cleanup (PR #3).*
-- *TASKS_2026-04-20.md — Apr 20 morning session (PR #2).*
-- *TASKS_2026-04-19.md — Apr 18 late-night Yad2→VM migration.*
-- *TASKS_2026-04-18_evening.md / _morning.md — Apr 18 sessions.*
-- *TASKS_2026-04-17.md — Apr 17 post-is_active-split.*
+- *TASKS_2026-07-12.md — Exec A shipped (full loop, QA on Neon branch); Maison lead-gen decisions recorded; anchor roll-up.*
+- *TASKS_2026-07-07.md — Apr 25 list + July 7 planning anchors.*
+- *TASKS_2026-04-25.md and earlier — see file list.*
