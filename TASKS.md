@@ -5,8 +5,26 @@
 
 ---
 
+## 🗺️ ROADMAP
+- ✅ Exec A (Phase 1) — canonical hoods + property_leads + arm_router (6160c58, on main, not deployed)
+- ⬜ Exec B (Phase 3) — hidden /leads routing UI (decision-complete, launches on "exec b")
+- ⬜ Yad2-on-Render fallback removal (Option A: reduce scraper.py to fetch_item_detail)
+- ⬜ Unfreeze + prod deploy — verify neighborhood backfill migration on prod
+
+---
+
+## 📊 RENT BENCHMARKS — CBS + Madlan (dormant while frozen)
+*Added 2026-08-11. Full reasoning + sources in `docs/rent-benchmarks-cbs.md`. Goal: give the `below_avg_price` signal and `neighborhood_thresholds` an independent, real-rent reference layer instead of a baseline derived from the same scraped asking data.*
+- ⬜ [L1] Pull the exact **CBS Table 4.9** Tel Aviv-Yafo rent-by-rooms figures (quarterly) and replace the secondary/aggregator ₪ numbers currently in `docs/rent-benchmarks-cbs.md`. Source URL is in that doc. CBS averages are magnitude-indicators only — never use for % change (their rule), never as a per-neighborhood benchmark (city-level only).
+- ⬜ [L3] Add a **city-level CBS sanity check** to the `below_avg_price` baseline in `signals.py`: flag when the scraped Tel Aviv median ₪/m² drifts far from the CBS anchor (baseline drift, not market). Guardrail only — do NOT replace the per-neighborhood baseline. L3 = touches a distress signal (sensitive core logic), review mandatory.
+- ⬜ [L2] Seed `neighborhood_thresholds` for all TLV hoods (only Florentin populated today — ties to the "Amit neighborhood threshold data" item under WAITING ON EXTERNAL INPUT) using **median ₪/m² per neighborhood from Madlan `searchDeals` + live listings**. Extraction method proven 2026-08-11 (the `api3` surface `scraper_madlan.py` already uses also exposes sold deals, days-on-market, and urban-renewal status per listing).
+- Note: asking→signed rent gap is small (~5%, renewals capped ~2%+index by Fair Rent Law), so asking-based rent signals are high-confidence; the sale-side gap is larger. Keep in mind wherever signals interpret asking prices.
+
+---
+
 ## 📌 SESSION ANCHORS (auto-collected)
 - **2026-07-08** [review] Bare `הצפון` ("North") is a standalone canonical entry in llm_parse.py:47, ambiguous vs הצפון הישן/החדש — Alan to decide whether it stays a valid canonical (open decision #4 from 07-12; revisit if it pollutes the Leads view) [L2]
+- **2026-07-22** [cross-project, found during NZP gap-analysis session] `~/nzp/gap-analysis`'s Yad2 sweep code was copy-adapted from this repo and had a display-URL bug (`/item/` vs `/realestate/item/` — link pointed at the wrong path, not the specific listing). The same pattern exists verbatim in `pdis/scraper.py:130-131` (or the render/display-URL builder near there). Not yet verified whether it's actually reachable/live here given the project is frozen, or already fixed since — worth a quick check whenever PDIS work resumes, before unfreeze [L1]
 
 ---
 
